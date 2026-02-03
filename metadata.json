@@ -1,0 +1,5 @@
+{
+  "name": "LifeSync AI",
+  "description": "An integrated personal dashboard combining calendar, tasks, and a diary. It uses Gemini AI to analyze your daily logs and generate insightful life update posts.",
+  "requestFramePermissions": []
+}

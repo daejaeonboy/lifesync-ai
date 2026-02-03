@@ -1,0 +1,560 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList } from '../types';
+import { Sparkles, ChevronRight } from '../components/Icons';
+import { format, parseISO, addDays, isSameDay } from 'date-fns';
+import { ko } from 'date-fns/locale';
+
+// Types for Chat Messages
+interface ChatMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: Date;
+    action?: {
+        type: 'add_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
+        data?: any;
+        executed?: boolean;
+    };
+    quickReplies?: string[];
+}
+
+interface ChatViewProps {
+    events: CalendarEvent[];
+    todos: Todo[];
+    entries: JournalEntry[];
+    posts: AiPost[];
+    todoLists: TodoList[];
+    onAddEvent: (event: CalendarEvent) => void;
+    onAddTodo: (text: string, listId?: string, dueDate?: string, category?: Todo['category']) => void;
+    onAddEntry: (content: string, mood: JournalEntry['mood']) => void;
+    onAddPost: (post: AiPost) => void;
+    requireConfirm?: boolean;
+}
+
+// Helper: Get time-based greeting
+const getTimeBasedGreeting = (): string => {
+    const hour = new Date().getHours();
+    if (hour < 6) return '새벽에도 깨어계시네요!';
+    if (hour < 12) return '좋은 아침이에요! ☀️';
+    if (hour < 14) return '점심시간이네요! 🍚';
+    if (hour < 18) return '좋은 오후예요! 🌤️';
+    if (hour < 22) return '오늘 하루 어떠셨나요? 🌙';
+    return '늦은 밤이네요. 오늘도 수고하셨어요 🌃';
+};
+
+// Helper: Get today's summary
+const getTodaySummary = (events: CalendarEvent[], todos: Todo[]): string => {
+    const pendingTodos = todos.filter(t => !t.completed).length;
+    const today = new Date();
+    const todayEvents = events.filter(e => isSameDay(parseISO(e.date), today)).length;
+
+    if (todayEvents === 0 && pendingTodos === 0) {
+        return '오늘은 예정된 일정이나 할 일이 없어요. 여유로운 하루를 보내세요!';
+    }
+
+    let summary = '';
+    if (todayEvents > 0) summary += `오늘 **${todayEvents}개의 일정**이 있고, `;
+    if (pendingTodos > 0) summary += `**${pendingTodos}개의 할 일**이 남아있어요.`;
+    return summary.replace(/, $/, '.');
+};
+
+const ChatView: React.FC<ChatViewProps> = ({
+    events,
+    todos,
+    entries,
+    posts,
+    todoLists,
+    onAddEvent,
+    onAddTodo,
+    onAddEntry,
+    onAddPost,
+    requireConfirm = true,
+}) => {
+    // Check if this is first visit (onboarding flow)
+    const [userName, setUserName] = useState<string>(() => localStorage.getItem('ls_userName') || '');
+    const [onboardingStep, setOnboardingStep] = useState<number>(() => userName ? -1 : 0);
+
+    const getWelcomeMessage = (): ChatMessage => {
+        if (onboardingStep === 0 && !userName) {
+            // First time user - start onboarding
+            return {
+                id: 'onboarding-1',
+                role: 'assistant',
+                content: `${getTimeBasedGreeting()}\n\n처음 오셨네요! 저는 **LifeSync AI**예요. 💬\n당신의 일상을 함께 정리하고 더 나은 하루를 만들어 드릴게요.\n\n먼저, 뭐라고 불러드리면 될까요?`,
+                timestamp: new Date(),
+                action: { type: 'onboarding' },
+            };
+        }
+
+        // Returning user - personalized greeting
+        return {
+            id: 'welcome',
+            role: 'assistant',
+            content: `${userName}님, ${getTimeBasedGreeting()}\n\n${getTodaySummary(events, todos)}\n\n무엇을 도와드릴까요?`,
+            timestamp: new Date(),
+            quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록', '주간 분석해줘'],
+        };
+    };
+
+    const [messages, setMessages] = useState<ChatMessage[]>(() => [getWelcomeMessage()]);
+    const [inputValue, setInputValue] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [conversationContext, setConversationContext] = useState<string[]>([]); // For context awareness
+    const [pendingAction, setPendingAction] = useState<ChatMessage['action'] | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
+
+    // Save username to localStorage
+    useEffect(() => {
+        if (userName) {
+            localStorage.setItem('ls_userName', userName);
+        }
+    }, [userName]);
+
+    // Simple NLP to detect intent with context awareness
+    const parseUserIntent = (text: string): ChatMessage['action'] | null => {
+        const lowerText = text.toLowerCase();
+
+        // Check if we're in onboarding flow
+        if (onboardingStep === 0 && !userName) {
+            return { type: 'onboarding', data: { step: 1, name: text.trim() } };
+        }
+        if (onboardingStep === 1) {
+            return { type: 'onboarding', data: { step: 2, preference: text } };
+        }
+
+        // Calendar/Event patterns
+        if (lowerText.includes('일정') || lowerText.includes('미팅') || lowerText.includes('약속') || lowerText.includes('회의') || lowerText.includes('예약')) {
+            // Check for "show" intent vs "add" intent
+            if (lowerText.includes('알려') || lowerText.includes('보여') || lowerText.includes('뭐가')) {
+                return null; // Just showing info, not adding
+            }
+
+            const timeMatch = text.match(/(\d{1,2})시/);
+            const startTime = timeMatch ? `${timeMatch[1].padStart(2, '0')}:00` : undefined;
+
+            let dateOffset = 0;
+            if (lowerText.includes('내일')) dateOffset = 1;
+            else if (lowerText.includes('모레')) dateOffset = 2;
+            else if (lowerText.includes('다음주')) dateOffset = 7;
+
+            const eventDate = format(addDays(new Date(), dateOffset), 'yyyy-MM-dd');
+
+            let title = text.replace(/내일|오늘|모레|다음주|오후|오전|\d+시에?|일정|잡아줘|추가해|등록해|해줘/g, '').trim();
+            if (title.length < 2) title = '새 일정';
+
+            return {
+                type: 'add_event',
+                data: {
+                    id: crypto.randomUUID(),
+                    title: title,
+                    date: eventDate,
+                    startTime: startTime,
+                    type: lowerText.includes('중요') ? 'important' : 'work',
+                } as CalendarEvent,
+            };
+        }
+
+        // Todo patterns
+        if (lowerText.includes('할 일') || lowerText.includes('할일') || lowerText.includes('추가') || lowerText.includes('사기') || lowerText.includes('하기') || lowerText.includes('해야')) {
+            let todoText = text.replace(/할 일|할일|목록에|추가해|등록해|줘|해야|돼/g, '').trim();
+            if (todoText.length < 2) todoText = '새 할 일';
+
+            const matchedList = todoLists.find(list => lowerText.includes(list.title.toLowerCase()));
+            const category: Todo['category'] =
+                lowerText.includes('운동') || lowerText.includes('헬스') || lowerText.includes('러닝') || lowerText.includes('산책')
+                    ? 'health'
+                    : lowerText.includes('사기') || lowerText.includes('장보기') || lowerText.includes('구매') || lowerText.includes('쇼핑')
+                        ? 'shopping'
+                        : lowerText.includes('업무') || lowerText.includes('회의') || lowerText.includes('프로젝트')
+                            ? 'work'
+                            : 'personal';
+
+            return {
+                type: 'add_todo',
+                data: { text: todoText, category, listId: matchedList?.id },
+            };
+        }
+
+        // Journal/Emotional patterns - Enhanced with context
+        const emotionalKeywords = ['피곤', '힘들', '기분', '우울', '슬프', '화나', '짜증', '행복', '좋았', '신나', '설레', '외로', '불안'];
+        const hasEmotionalContent = emotionalKeywords.some(keyword => lowerText.includes(keyword));
+
+        if (hasEmotionalContent || lowerText.includes('오늘 하루') || lowerText.includes('였어') || lowerText.includes('이었어')) {
+            let mood: JournalEntry['mood'] = 'neutral';
+            if (lowerText.includes('좋') || lowerText.includes('행복') || lowerText.includes('신나') || lowerText.includes('설레')) mood = 'good';
+            if (lowerText.includes('피곤') || lowerText.includes('힘들') || lowerText.includes('슬프') || lowerText.includes('우울') || lowerText.includes('나쁨') || lowerText.includes('화나') || lowerText.includes('짜증')) mood = 'bad';
+
+            return {
+                type: 'add_journal',
+                data: { content: text, mood },
+            };
+        }
+
+        // AI Insight patterns
+        if (lowerText.includes('분석') || lowerText.includes('리포트') || lowerText.includes('인사이트') || lowerText.includes('조언') || lowerText.includes('패턴')) {
+            return {
+                type: 'generate_insight',
+            };
+        }
+
+        return null;
+    };
+
+    const executeAction = (action: ChatMessage['action']) => {
+        if (!action) return;
+
+        switch (action.type) {
+            case 'onboarding':
+                if (action.data?.step === 1) {
+                    setUserName(action.data.name);
+                    setOnboardingStep(1);
+                } else if (action.data?.step === 2) {
+                    setOnboardingStep(-1); // Onboarding complete
+                }
+                break;
+            case 'add_event':
+                onAddEvent(action.data);
+                break;
+            case 'add_todo':
+                {
+                    const todoData = typeof action.data === 'string'
+                        ? { text: action.data, category: 'personal' }
+                        : action.data;
+                    onAddTodo(todoData.text, todoData.listId, todoData.dueDate, todoData.category);
+                }
+                break;
+            case 'add_journal':
+                onAddEntry(action.data.content, action.data.mood);
+                break;
+            case 'generate_insight':
+                const completedTodos = todos.filter(t => t.completed).length;
+                const pendingTodos = todos.filter(t => !t.completed).length;
+                const recentMoods = entries.slice(0, 5).map(e => e.mood);
+                const moodSummary = recentMoods.length > 0
+                    ? `최근 감정 기록을 보면, ${recentMoods.filter(m => m === 'good').length > recentMoods.filter(m => m === 'bad').length ? '전반적으로 좋은 하루를 보내고 계시네요! 😊' : '조금 힘든 시간이 있었던 것 같아요. 충분한 휴식을 추천드려요. 🌿'}`
+                    : '아직 감정 기록이 없어요. 하루를 기록해보시면 제가 더 잘 도와드릴 수 있어요!';
+
+                const newPost: AiPost = {
+                    id: crypto.randomUUID(),
+                    title: `${userName || '사용자'}님의 라이프 분석`,
+                    content: `📊 **생산성 리포트**\n\n✅ 완료한 할 일: ${completedTodos}개\n⏳ 남은 할 일: ${pendingTodos}개\n📅 예정된 일정: ${events.length}개\n\n${moodSummary}\n\n💡 **오늘의 제안**: ${pendingTodos > 3 ? '할 일이 조금 쌓여있네요. 가장 중요한 것 하나만 먼저 끝내보시면 어떨까요?' : '잘 관리하고 계시네요! 자신에게 작은 보상을 주세요 ☕'}`,
+                    date: new Date().toISOString(),
+                    tags: ['분석', '생산성', '감정'],
+                    type: 'analysis',
+                };
+                onAddPost(newPost);
+                break;
+        }
+    };
+
+    const getResponseForAction = (action: ChatMessage['action'] | null, userText: string): { content: string; quickReplies?: string[] } => {
+        // Onboarding responses
+        if (action?.type === 'onboarding') {
+            if (action.data?.step === 1) {
+                return {
+                    content: `${action.data.name}님, 반가워요! 🎉\n\n저와 어떤 이야기를 나누고 싶으세요?\n\n편하게 선택해주시거나, 자유롭게 말씀해주세요!`,
+                    quickReplies: ['일정 관리가 필요해', '할 일을 정리하고 싶어', '오늘 기분을 기록하고 싶어', '그냥 이야기하고 싶어'],
+                };
+            }
+            if (action.data?.step === 2) {
+                return {
+                    content: `좋아요! 이제 준비가 됐어요. ✨\n\n${userName}님의 하루를 더 나은 방향으로 이끌어 드릴게요.\n\n그럼 바로 시작해볼까요? 무엇이든 편하게 말씀해주세요!`,
+                    quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록'],
+                };
+            }
+        }
+
+        if (!action) {
+            // Context-aware fallback - check recent conversation
+            const recentContext = conversationContext.slice(-3).join(' ');
+
+            // Check if user is just chatting
+            if (userText.length < 10 && !userText.includes('?')) {
+                return {
+                    content: `네, ${userName || ''}님! 더 말씀해주세요. 듣고 있어요. 😊`,
+                    quickReplies: ['일정 추가하고 싶어', '할 일 정리해줘', '오늘 하루 어땠는지 기록할래'],
+                };
+            }
+
+            return {
+                content: `음, 요청을 정확히 이해하지 못했어요. 😅\n\n혹시 이런 걸 원하셨나요?`,
+                quickReplies: ['일정 추가', '할 일 추가', '오늘 기분 기록', '분석해줘'],
+            };
+        }
+
+        switch (action.type) {
+            case 'add_event':
+                return {
+                    content: `✅ 캘린더에 일정을 등록했어요!\n\n📅 **${action.data.title}**\n📆 ${format(parseISO(action.data.date), 'M월 d일 (EEEE)', { locale: ko })}${action.data.startTime ? `\n⏰ ${action.data.startTime}` : ''}\n\n캘린더에서 확인해보세요!`,
+                    quickReplies: ['다른 일정 추가', '오늘 할 일 보여줘', '고마워'],
+                };
+            case 'add_todo':
+                return {
+                    content: `✅ 할 일 목록에 추가했어요!\n\n☑️ **${action.data.text ?? action.data}**\n🏷️ ${getListLabel(action.data.listId)}\n\n완료하면 체크해주세요! 화이팅! 💪`,
+                    quickReplies: ['다른 할 일 추가', '지금 할 일 뭐야?', '고마워'],
+                };
+            case 'add_journal': {
+                const moodEmoji = action.data.mood === 'good' ? '😊' : action.data.mood === 'bad' ? '😔' : '😐';
+
+                // Emotional Dialogue Flow - Enhanced empathetic response
+                if (action.data.mood === 'bad') {
+                    return {
+                        content: `${moodEmoji} 그랬군요... 정말 힘드셨겠어요.\n\n일기장에 오늘의 이야기를 기록해뒀어요.\n\n혹시 조금 더 이야기하고 싶으시면, 무슨 일이 있었는지 말씀해주세요. 함께 정리해볼게요. 🌿`,
+                        quickReplies: ['조금 더 이야기하고 싶어', '괜찮아, 그냥 기록만', '오늘은 일찍 쉴래'],
+                    };
+                } else if (action.data.mood === 'good') {
+                    return {
+                        content: `${moodEmoji} 오, 좋은 하루였나봐요! 저도 기분이 좋아지네요.\n\n일기장에 오늘의 기분을 기록해뒀어요.\n\n무슨 좋은 일이 있었는지 더 들려주실래요?`,
+                        quickReplies: ['응, 좋은 일 있었어!', '그냥 기분이 좋아', '내일도 이랬으면'],
+                    };
+                }
+                return {
+                    content: `${moodEmoji} 오늘의 이야기를 일기장에 기록했어요.\n\n내일은 더 좋은 하루가 되길 바래요!`,
+                    quickReplies: ['고마워', '내일 할 일 알려줘', '이제 쉴래'],
+                };
+            }
+            case 'generate_insight':
+                return {
+                    content: `✅ AI 인사이트를 생성했어요!\n\n**AI 보드** 탭에서 ${userName || '사용자'}님의 라이프 분석 리포트를 확인해보세요. 📊\n\n더 많은 데이터가 쌓일수록 더 정확한 분석이 가능해요!`,
+                    quickReplies: ['분석 더 해줘', '오늘 할 일 뭐야?', '고마워'],
+                };
+            default:
+                return { content: '처리 완료!' };
+        }
+    };
+
+    const getMoodLabel = (mood: JournalEntry['mood']) => {
+        if (mood === 'good') return '좋음';
+        if (mood === 'bad') return '안좋음';
+        return '보통';
+    };
+
+    const getListLabel = (listId?: string) => {
+        if (!listId) return '기본 목록';
+        return todoLists.find(l => l.id === listId)?.title ?? '기본 목록';
+    };
+
+    const requiresConfirmation = (action: ChatMessage['action'] | null) => {
+        if (!requireConfirm) return false;
+        return action?.type === 'add_event' || action?.type === 'add_todo' || action?.type === 'add_journal';
+    };
+
+    const buildConfirmationPrompt = (action: ChatMessage['action']): { content: string; quickReplies: string[] } => {
+        let summary = '';
+        if (action.type === 'add_event') {
+            const eventDate = format(parseISO(action.data.date), 'M월 d일 (EEEE)', { locale: ko });
+            summary = `📅 일정: **${action.data.title}**\n📆 ${eventDate}${action.data.startTime ? `\n⏰ ${action.data.startTime}` : ''}`;
+        } else if (action.type === 'add_todo') {
+            const text = action.data.text ?? action.data;
+            summary = `☑️ 할 일: **${text}**\n🏷️ 목록: ${getListLabel(action.data.listId)}`;
+        } else if (action.type === 'add_journal') {
+            const snippet = (action.data.content || '').slice(0, 60);
+            summary = `📝 일기: "${snippet}${action.data.content?.length > 60 ? '…' : ''}"\n🙂 기분: ${getMoodLabel(action.data.mood)}`;
+        }
+
+        return {
+            content: `요청을 이렇게 이해했어요.\n\n${summary}\n\n이대로 실행할까요?`,
+            quickReplies: ['실행', '취소'],
+        };
+    };
+
+    const handleSend = async (text?: string) => {
+        const messageText = text || inputValue;
+        if (!messageText.trim() || isProcessing) return;
+
+        const trimmedMessage = messageText.trim();
+        const isConfirm = pendingAction && ['실행', '확인', '네', '응', '좋아'].includes(trimmedMessage);
+        const isCancel = pendingAction && ['취소', '아니', '그만', '나중에'].includes(trimmedMessage);
+
+        const userMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: messageText,
+            timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, userMessage]);
+        setInputValue('');
+        setIsProcessing(true);
+
+        // Update conversation context for awareness
+        setConversationContext(prev => [...prev.slice(-4), messageText]);
+
+        // Simulate AI processing delay
+        await new Promise((resolve) => setTimeout(resolve, 600 + Math.random() * 400));
+
+        if (pendingAction && (isConfirm || isCancel)) {
+            if (isCancel) {
+                setPendingAction(null);
+                const assistantMessage: ChatMessage = {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    content: '알겠어요. 요청은 취소했어요.',
+                    timestamp: new Date(),
+                    quickReplies: ['다른 요청 하기', '오늘 일정 알려줘', '할 일 추가'],
+                };
+                setMessages((prev) => [...prev, assistantMessage]);
+                setIsProcessing(false);
+                return;
+            }
+
+            executeAction(pendingAction);
+            const confirmedResponse = getResponseForAction(pendingAction, messageText);
+            const assistantMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: confirmedResponse.content,
+                timestamp: new Date(),
+                action: { ...pendingAction, executed: true },
+                quickReplies: confirmedResponse.quickReplies,
+            };
+            setMessages((prev) => [...prev, assistantMessage]);
+            setPendingAction(null);
+            setIsProcessing(false);
+            return;
+        }
+
+        if (pendingAction && !isConfirm && !isCancel) {
+            setPendingAction(null);
+        }
+
+        const action = parseUserIntent(messageText);
+
+        if (action && requiresConfirmation(action)) {
+            setPendingAction(action);
+            const prompt = buildConfirmationPrompt(action);
+            const assistantMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: prompt.content,
+                timestamp: new Date(),
+                action,
+                quickReplies: prompt.quickReplies,
+            };
+            setMessages((prev) => [...prev, assistantMessage]);
+            setIsProcessing(false);
+            return;
+        }
+
+        if (action) {
+            executeAction(action);
+        }
+
+        const response = getResponseForAction(action, messageText);
+
+        const assistantMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: response.content,
+            timestamp: new Date(),
+            action: action ? { ...action, executed: true } : undefined,
+            quickReplies: response.quickReplies,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        setIsProcessing(false);
+    };
+
+    const handleQuickReply = (reply: string) => {
+        handleSend(reply);
+    };
+
+    return (
+        <div className="max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans">
+            {/* Header */}
+            <div className="pt-4 pb-4 px-2 border-b border-[#f7f7f5]">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-md">
+                        <Sparkles size={20} />
+                    </div>
+                    <div>
+                        <h1 className="text-xl font-bold tracking-tight">LifeSync AI</h1>
+                        <p className="text-xs text-[#9b9a97]">{userName ? `${userName}님의 개인 비서` : '당신의 하루를 함께해요'}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Chat Messages Area */}
+            <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6">
+                {messages.map((msg) => (
+                    <div key={msg.id}>
+                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                                className={`
+                  max-w-[85%] p-4 rounded-2xl whitespace-pre-line leading-relaxed
+                  ${msg.role === 'user'
+                                        ? 'bg-[#37352f] text-white rounded-br-md'
+                                        : 'bg-[#f7f7f5] text-[#37352f] border border-[#e9e9e8] rounded-bl-md'}
+                `}
+                            >
+                                {msg.content.split('**').map((part, i) =>
+                                    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Quick Replies */}
+                        {msg.role === 'assistant' && msg.quickReplies && msg.quickReplies.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-3 ml-1">
+                                {msg.quickReplies.map((reply, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => handleQuickReply(reply)}
+                                        className="px-3 py-1.5 text-sm bg-white border border-[#e9e9e8] text-[#37352f] rounded-full hover:bg-[#f7f7f5] hover:border-[#d3d1cb] transition-all shadow-sm"
+                                    >
+                                        {reply}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ))}
+
+                {isProcessing && (
+                    <div className="flex justify-start">
+                        <div className="bg-[#f7f7f5] text-[#9b9a97] p-4 rounded-2xl rounded-bl-md border border-[#e9e9e8] flex items-center gap-2">
+                            <div className="flex gap-1">
+                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input Area */}
+            <div className="p-4 border-t border-[#e9e9e8] bg-white">
+                <div className="flex gap-3 items-end">
+                    <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        placeholder={onboardingStep === 0 ? "이름을 입력해주세요..." : "무엇이든 말씀해주세요..."}
+                        className="flex-1 p-4 bg-[#f7f7f5] border border-[#e9e9e8] rounded-xl text-lg placeholder-[#d3d1cb] focus:outline-none focus:border-[#37352f] focus:bg-white transition-all"
+                        disabled={isProcessing}
+                    />
+                    <button
+                        onClick={() => handleSend()}
+                        disabled={!inputValue.trim() || isProcessing}
+                        className="p-4 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                    >
+                        <ChevronRight size={24} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ChatView;
