@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Todo, TodoList } from '../types';
-import { Check, ChevronRight, MoreVertical, CalendarIcon } from '../components/Icons';
+import { Check, ChevronRight, MoreVertical, CalendarIcon, Trash2, Layout, Plus } from '../components/Icons';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
@@ -10,17 +10,46 @@ interface TodoViewProps {
   onAddList: (title: string) => void;
   onUpdateList: (id: string, title: string) => void;
   onAddTodo: (text: string, listId?: string, dueDate?: string) => void;
+  onUpdateTodo?: (id: string, updates: Partial<Todo>) => void;
   onToggleTodo: (id: string) => void;
   onDeleteTodo: (id: string) => void;
 }
 
-const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateList, onAddTodo, onToggleTodo, onDeleteTodo }) => {
+const TodoView: React.FC<TodoViewProps> = ({
+  todos,
+  lists,
+  onAddList,
+  onUpdateList,
+  onAddTodo,
+  onUpdateTodo,
+  onToggleTodo,
+  onDeleteTodo
+}) => {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showCompleted, setShowCompleted] = useState<Record<string, boolean>>({});
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListTitle, setEditingListTitle] = useState('');
 
+  // Editing state for todo text
+  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [editingTodoText, setEditingTodoText] = useState('');
+
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
   const sortedLists = [...lists].sort((a, b) => a.order - b.order);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleAddTodo = (listId: string) => {
     const text = drafts[listId]?.trim();
@@ -42,6 +71,31 @@ const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateLi
     setEditingListTitle('');
   };
 
+  const startEditingTodo = (todo: Todo) => {
+    setEditingTodoId(todo.id);
+    setEditingTodoText(todo.text);
+    setContextMenu(null); // Close menu if open
+  };
+
+  const saveTodoText = () => {
+    if (editingTodoId && onUpdateTodo) {
+      if (editingTodoText.trim()) {
+        onUpdateTodo(editingTodoId, { text: editingTodoText.trim() });
+      } else {
+        // Optionally delete if empty? For now just revert to original or do nothing
+      }
+    }
+    setEditingTodoId(null);
+    setEditingTodoText('');
+  };
+
+  const handleMoveTodo = (todoId: string, newListId: string) => {
+    if (onUpdateTodo) {
+      onUpdateTodo(todoId, { listId: newListId });
+    }
+    setContextMenu(null);
+  };
+
   const getDueLabel = (dueDate?: string) => {
     if (!dueDate) return null;
     const d = parseISO(dueDate);
@@ -57,37 +111,14 @@ const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateLi
         <div />
         <div className="flex items-center gap-2">
           <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#f7f7f5] text-[#9b9a97]">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-          </button>
-          <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#f7f7f5] text-[#9b9a97]">
-            <CalendarIcon size={18} />
-          </button>
-          <button className="w-8 h-8 flex items-center justify-center rounded-lg bg-[#37352f] text-white">
-            <Check size={18} />
-          </button>
-          <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#f7f7f5] text-[#9b9a97]">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="5" cy="5" r="2" />
-              <circle cx="12" cy="5" r="2" />
-              <circle cx="19" cy="5" r="2" />
-              <circle cx="5" cy="12" r="2" />
-              <circle cx="12" cy="12" r="2" />
-              <circle cx="19" cy="12" r="2" />
-              <circle cx="5" cy="19" r="2" />
-              <circle cx="12" cy="19" r="2" />
-              <circle cx="19" cy="19" r="2" />
-            </svg>
+            <Layout size={18} />
           </button>
         </div>
       </div>
 
       {/* Kanban Board */}
-      <div className="flex gap-0 overflow-x-auto h-[calc(100%-60px)]">
-        {sortedLists.map((list, listIndex) => {
+      <div className="flex gap-4 overflow-x-auto h-[calc(100%-65px)] p-6 items-start">
+        {sortedLists.map((list) => {
           const listTodos = todos.filter(t => t.listId === list.id);
           const pending = listTodos.filter(t => !t.completed);
           const completed = listTodos.filter(t => t.completed);
@@ -96,10 +127,10 @@ const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateLi
           return (
             <div
               key={list.id}
-              className={`min-w-[200px] flex-1 max-w-[240px] flex flex-col bg-white ${listIndex > 0 ? 'border-l border-[#e9e9e8]' : ''}`}
+              className="min-w-[280px] w-[280px] flex flex-col max-h-full"
             >
               {/* Column Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[#f0f0ef]">
+              <div className="flex items-center justify-between px-1 py-2 mb-2">
                 {editingListId === list.id ? (
                   <input
                     autoFocus
@@ -113,105 +144,160 @@ const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateLi
                         setEditingListTitle('');
                       }
                     }}
-                    className="font-medium text-[15px] text-[#37352f] bg-transparent border-b border-[#37352f] focus:outline-none w-full"
+                    className="font-bold text-[15px] text-[#37352f] bg-transparent border-b border-[#37352f] focus:outline-none w-full"
                   />
                 ) : (
                   <h3
-                    className="font-medium text-[15px] text-[#37352f] cursor-pointer hover:bg-[#f7f7f5] px-1 -mx-1 rounded"
+                    className="font-bold text-[15px] text-[#37352f] cursor-pointer hover:bg-[#eaeaea] px-2 py-1 rounded transition-colors"
                     onClick={() => startEditingList(list)}
                   >
                     {list.title}
                   </h3>
                 )}
-                <button className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#f7f7f5] text-[#9b9a97]">
+                <button className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#eaeaea] text-[#9b9a97]">
                   <MoreVertical size={14} />
                 </button>
               </div>
 
-              {/* Add Todo Link */}
-              <div className="px-4 py-2">
-                {drafts[list.id] !== undefined && drafts[list.id] !== '' ? (
-                  <input
-                    autoFocus
-                    value={drafts[list.id]}
-                    onChange={(e) => setDrafts(prev => ({ ...prev, [list.id]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddTodo(list.id);
-                      if (e.key === 'Escape') setDrafts(prev => ({ ...prev, [list.id]: '' }));
-                    }}
-                    onBlur={() => {
-                      if (!drafts[list.id]?.trim()) {
-                        setDrafts(prev => ({ ...prev, [list.id]: '' }));
-                      }
-                    }}
-                    placeholder="할 일을 입력하세요"
-                    className="w-full text-sm text-[#37352f] bg-transparent focus:outline-none"
-                  />
-                ) : (
-                  <button
-                    onClick={() => setDrafts(prev => ({ ...prev, [list.id]: ' ' }))}
-                    className="flex items-center gap-1.5 text-[#37352f] text-sm hover:underline"
-                  >
-                    <Check size={14} />
-                    <span>할 일 추가</span>
-                  </button>
-                )}
+              {/* Add Todo Input */}
+              <div className="mb-3 px-1">
+                <div className="relative group">
+                  <div className="absolute left-3 top-2 text-[#9b9a97]">
+                    <Plus size={14} />
+                  </div>
+                  {drafts[list.id] !== undefined && drafts[list.id] !== '' ? (
+                    <input
+                      autoFocus
+                      value={drafts[list.id]}
+                      onChange={(e) => setDrafts(prev => ({ ...prev, [list.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddTodo(list.id);
+                        if (e.key === 'Escape') setDrafts(prev => ({ ...prev, [list.id]: '' }));
+                      }}
+                      onBlur={() => {
+                        if (!drafts[list.id]?.trim()) {
+                          setDrafts(prev => ({ ...prev, [list.id]: '' }));
+                        }
+                      }}
+                      placeholder="할 일 추가"
+                      className="w-full pl-8 pr-3 py-1.5 text-sm bg-transparent focus:outline-none rounded hover:bg-[#eaeaea] focus:bg-[#eaeaea] transition-colors placeholder:text-[#37352f] text-[#37352f]"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setDrafts(prev => ({ ...prev, [list.id]: ' ' }))}
+                      className="w-full text-left pl-8 pr-3 py-1.5 text-sm text-[#37352f] font-medium rounded hover:bg-[#eaeaea] transition-colors"
+                    >
+                      할 일 추가
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* Todo Items */}
-              <div className="flex-1 overflow-y-auto px-4 pb-4">
-                <div className="space-y-1">
-                  {pending.map(todo => {
-                    const dueLabel = getDueLabel(todo.dueDate);
-                    return (
-                      <div
-                        key={todo.id}
-                        className="group flex items-start gap-2 py-1.5 hover:bg-[#f7f7f5] rounded px-1 -mx-1 cursor-pointer"
-                        onClick={() => onToggleTodo(todo.id)}
-                      >
-                        <div className="w-4 h-4 mt-0.5 rounded-full border-2 border-[#d3d1cb] flex-shrink-0 group-hover:border-[#37352f] transition-colors" />
+              {/* Todo Cards */}
+              <div className="flex-1 overflow-y-auto px-1 pb-4 space-y-2">
+                {pending.map(todo => {
+                  const dueLabel = getDueLabel(todo.dueDate);
+                  const isEditing = editingTodoId === todo.id;
+
+                  return (
+                    <div
+                      key={todo.id}
+                      className="group relative bg-white border border-[#e9e9e8] rounded-lg p-3 shadow-sm hover:shadow-md transition-all"
+                    >
+                      {/* Checkbox & Content */}
+                      <div className="flex items-start gap-3">
+                        <div
+                          className="w-5 h-5 mt-0.5 rounded-full border border-[#d3d1cb] flex-shrink-0 cursor-pointer hover:border-[#37352f] hover:bg-[#f7f7f5] transition-all"
+                          onClick={() => onToggleTodo(todo.id)}
+                        />
+
                         <div className="flex-1 min-w-0">
-                          <p className="text-[13px] text-[#37352f] leading-snug">{todo.text}</p>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={editingTodoText}
+                              onChange={(e) => setEditingTodoText(e.target.value)}
+                              onBlur={saveTodoText}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveTodoText();
+                                if (e.key === 'Escape') {
+                                  setEditingTodoId(null);
+                                  setEditingTodoText('');
+                                }
+                              }}
+                              className="w-full text-[14px] text-[#37352f] bg-transparent border-b border-[#37352f] focus:outline-none leading-relaxed"
+                            />
+                          ) : (
+                            <p
+                              className="text-[14px] text-[#37352f] leading-relaxed cursor-text"
+                              onClick={() => startEditingTodo(todo)}
+                            >
+                              {todo.text}
+                            </p>
+                          )}
+
                           {dueLabel && (
-                            <span className="inline-flex items-center gap-1 mt-1 text-[11px] px-1.5 py-0.5 rounded bg-[#f7f7f5] text-[#9b9a97]">
-                              <CalendarIcon size={10} />
-                              {dueLabel}
-                            </span>
+                            <div className="mt-2 flex items-center gap-1.5 text-xs text-[#787774] bg-[#f7f7f5] inline-flex px-2 py-0.5 rounded border border-[#e9e9e8]">
+                              <CalendarIcon size={12} />
+                              <span>{dueLabel}</span>
+                            </div>
                           )}
                         </div>
+
+                        {/* More Button */}
+                        <button
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-[#f7f7f5] rounded text-[#9b9a97] transition-all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContextMenu({
+                              id: todo.id,
+                              x: e.clientX,
+                              y: e.clientY
+                            });
+                          }}
+                        >
+                          <MoreVertical size={16} />
+                        </button>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  );
+                })}
 
                 {/* Completed Section */}
                 {completed.length > 0 && (
-                  <button
-                    onClick={() => setShowCompleted(prev => ({ ...prev, [list.id]: !showDone }))}
-                    className="flex items-center gap-1 mt-4 text-[12px] text-[#9b9a97] hover:text-[#37352f]"
-                  >
-                    <ChevronRight
-                      size={12}
-                      className={`transition-transform ${showDone ? 'rotate-90' : ''}`}
-                    />
-                    <span>완료됨({completed.length}개)</span>
-                  </button>
-                )}
+                  <div className="pt-2">
+                    <button
+                      onClick={() => setShowCompleted(prev => ({ ...prev, [list.id]: !showDone }))}
+                      className="flex items-center gap-1.5 text-xs font-medium text-[#9b9a97] hover:text-[#37352f] px-1 py-1 rounded hover:bg-[#eaeaea] transition-colors w-full"
+                    >
+                      <ChevronRight
+                        size={14}
+                        className={`transition-transform duration-200 ${showDone ? 'rotate-90' : ''}`}
+                      />
+                      <span>완료됨 ({completed.length})</span>
+                    </button>
 
-                {showDone && completed.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {completed.map(todo => (
-                      <div
-                        key={todo.id}
-                        className="group flex items-start gap-2 py-1.5 hover:bg-[#f7f7f5] rounded px-1 -mx-1 cursor-pointer opacity-50"
-                        onClick={() => onToggleTodo(todo.id)}
-                      >
-                        <div className="w-4 h-4 mt-0.5 rounded-full bg-[#37352f] flex-shrink-0 flex items-center justify-center">
-                          <Check size={10} className="text-white" />
-                        </div>
-                        <p className="text-[13px] text-[#9b9a97] line-through leading-snug">{todo.text}</p>
+                    {showDone && (
+                      <div className="mt-2 space-y-2 pl-2 border-l-2 border-[#f0f0f0] ml-2">
+                        {completed.map(todo => (
+                          <div key={todo.id} className="group flex items-start gap-2 py-1 opacity-60 hover:opacity-100 transition-opacity">
+                            <div
+                              className="w-4 h-4 mt-0.5 rounded-full bg-[#37352f] flex-shrink-0 flex items-center justify-center cursor-pointer"
+                              onClick={() => onToggleTodo(todo.id)}
+                            >
+                              <Check size={10} className="text-white" />
+                            </div>
+                            <span className="text-sm text-[#9b9a97] line-through flex-1">{todo.text}</span>
+                            <button
+                              className="opacity-0 group-hover:opacity-100 text-[#9b9a97] hover:text-red-500"
+                              onClick={() => onDeleteTodo(todo.id)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -219,6 +305,39 @@ const TodoView: React.FC<TodoViewProps> = ({ todos, lists, onAddList, onUpdateLi
           );
         })}
       </div>
+
+      {/* Context Menu Portal */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed bg-white rounded-lg shadow-xl border border-[#e9e9e8] py-1 z-50 w-48 animate-in fade-in zoom-in-95 duration-100"
+          style={{ top: contextMenu.y, left: contextMenu.x - 180 }}
+        >
+          <div className="px-3 py-2 border-b border-[#f0f0ef] text-xs font-semibold text-[#9b9a97]">
+            작업 이동
+          </div>
+          {lists.map(list => (
+            <button
+              key={list.id}
+              className="w-full text-left px-3 py-2 text-sm text-[#37352f] hover:bg-[#f7f7f5] flex items-center gap-2"
+              onClick={() => handleMoveTodo(contextMenu.id, list.id)}
+            >
+              {list.title}
+            </button>
+          ))}
+          <div className="my-1 border-t border-[#f0f0ef]" />
+          <button
+            className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+            onClick={() => {
+              onDeleteTodo(contextMenu.id);
+              setContextMenu(null);
+            }}
+          >
+            <Trash2 size={14} />
+            <span>삭제</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

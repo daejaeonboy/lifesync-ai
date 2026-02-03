@@ -304,6 +304,10 @@ const App: React.FC = () => {
     });
   };
 
+  const updateTodo = (id: string, updates: Partial<Todo>) => {
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
   const toggleTodo = (id: string) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
