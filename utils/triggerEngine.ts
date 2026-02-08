@@ -389,30 +389,31 @@ export const generateCommunityPosts = (
     });
 };
 
-export const generateJournalComment = (
+export const generateJournalComment = async (
     entry: { title: string; content: string; mood: string },
     agents: AIAgent[],
-    addComment: (comment: Omit<import('../types').Comment, 'id' | 'timestamp'>) => void,
+    addComment: (comment: { authorId: string; authorName: string; authorEmoji: string; content: string }) => void,
     apiKey?: string,
     updateUsage?: (stats: ApiUsageStats) => void
-): void => {
-    // Select a random agent or specific logic
+): Promise<void> => {
+    // Select a random agent or specific logic - For journal, let's pick the first one or random
     const agent = getRandomItem(agents) || DEFAULT_AGENTS[0];
 
     // 1. Try Gemini
     if (apiKey) {
-        const prompt = createAgentPrompt(
-            {
-                name: agent.name,
-                role: agent.role,
-                personality: agent.personality,
-                tone: agent.tone
-            },
-            `사용자가 일기(메모)를 작성했습니다. 이에 대해 공감하거나 조언하는 짧은 댓글을 남겨주세요. 길이는 2~3문장으로 짧게.`,
-            JSON.stringify(entry)
-        );
+        try {
+            const prompt = createAgentPrompt(
+                {
+                    name: agent.name,
+                    role: agent.role,
+                    personality: agent.personality,
+                    tone: agent.tone
+                },
+                `사용자가 일기(메모)를 작성했습니다. 이에 대해 공감하거나 조언하는 짧은 댓글을 남겨주세요. 길이는 2~3문장으로.`,
+                JSON.stringify(entry)
+            );
 
-        callGeminiAPI(apiKey, prompt, updateUsage).then(content => {
+            const content = await callGeminiAPI(apiKey, prompt, updateUsage);
             if (content) {
                 addComment({
                     authorId: agent.id,
@@ -420,28 +421,17 @@ export const generateJournalComment = (
                     authorEmoji: agent.emoji,
                     content
                 });
+                return;
             }
-        }).catch(err => {
-            console.error(err);
-            // Fallback
-            const template = getFirstResponse(agent.id, 'journal_added');
-            if (template) {
-                const content = fillTemplate(template, { mood: entry.mood });
-                addComment({
-                    authorId: agent.id,
-                    authorName: agent.name,
-                    authorEmoji: agent.emoji,
-                    content
-                });
-            }
-        });
-        return;
+        } catch (err) {
+            console.error("Gemini API Error in Journal Comment:", err);
+            // Fallback to template on error will happen below
+        }
     }
 
-    // 2. Fallback Template
+    // 2. Fallback Template (if no API key or API failed)
     const template = getFirstResponse(agent.id, 'journal_added');
     if (template) {
-        // Simple delay for effect
         setTimeout(() => {
             const content = fillTemplate(template, { mood: entry.mood });
             addComment({
