@@ -58,7 +58,6 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
             <div className="flex justify-between items-start mb-8 pt-4">
                 <div>
                     <h1 className="text-4xl font-bold mb-3 tracking-tight flex items-center gap-3">
-                        <span className="text-3xl">🎭</span>
                         AI 페르소나 설정
                     </h1>
                     <p className="text-[#9b9a97] text-lg font-medium">각 AI의 성격과 말투를 커스터마이징하세요.</p>
@@ -111,7 +110,7 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
 
             {/* Description Section */}
             <div className="mt-12 bg-[#fbfbfa] border border-[#e9e9e8] rounded-xl p-6">
-                <h3 className="font-bold mb-4">💡 페르소나란?</h3>
+                <h3 className="font-bold mb-4">페르소나란?</h3>
                 <p className="text-sm text-[#787774] leading-relaxed mb-4">
                     각 AI 에이전트는 고유한 성격과 역할을 가지고 있습니다.
                     당신이 캘린더에 일정을 추가하거나, 할 일을 완료하거나, 일기를 쓸 때마다
@@ -128,7 +127,7 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
             {/* App Settings */}
             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white border border-[#e9e9e8] rounded-xl p-6">
-                    <h3 className="font-bold mb-4">⚙️ 자동 반응 설정</h3>
+                    <h3 className="font-bold mb-4">자동 반응 설정</h3>
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <p className="text-sm font-semibold text-[#37352f]">AI 자동 반응</p>
@@ -161,7 +160,7 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                 </div>
 
                 <div className="bg-white border border-[#e9e9e8] rounded-xl p-6">
-                    <h3 className="font-bold mb-4">🧾 데이터 관리</h3>
+                    <h3 className="font-bold mb-4">데이터 관리</h3>
                     <div className="space-y-3">
                         <button
                             onClick={onExportData}

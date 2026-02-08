@@ -136,7 +136,7 @@ export interface ApiUsageStats {
   lastRequestDate?: string;
 }
 
-export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings';
+export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings' | 'personas';
 
 export interface TriggerContext {
   trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'chat_message';

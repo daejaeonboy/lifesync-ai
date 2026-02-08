@@ -63,7 +63,6 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
             <div className="flex items-start mb-8 pt-4">
                 <div>
                     <h1 className="text-4xl font-bold mb-3 tracking-tight flex items-center gap-3">
-                        <span className="text-3xl">🔌</span>
                         API 연결 설정
                     </h1>
                     <p className="text-[#9b9a97] text-lg font-medium">다양한 AI 모델을 연결하여 나만의 비서를 만드세요.</p>
@@ -92,8 +91,8 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
                     <div key={conn.id} className={`bg-white border rounded-xl p-5 flex items-center justify-between transition-all ${conn.isActive ? 'border-[#37352f] shadow-sm' : 'border-[#e9e9e8] opacity-70'}`}>
                         <div className="flex items-center gap-4">
                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-sm ${conn.provider === 'gemini' ? 'bg-blue-100 text-blue-600' :
-                                    conn.provider === 'openai' ? 'bg-green-100 text-green-600' :
-                                        conn.provider === 'anthropic' ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-600'
+                                conn.provider === 'openai' ? 'bg-green-100 text-green-600' :
+                                    conn.provider === 'anthropic' ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-600'
                                 }`}>
                                 {conn.provider === 'gemini' ? 'G' : conn.provider === 'openai' ? 'O' : conn.provider === 'anthropic' ? 'C' : '?'}
                             </div>
@@ -114,8 +113,8 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
                             <button
                                 onClick={() => toggleConnection(conn.id)}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${conn.isActive
-                                        ? 'bg-[#e5f9e7] text-[#27c93f] hover:bg-[#d4f5d7]'
-                                        : 'bg-[#f1f1f0] text-[#9b9a97] hover:bg-[#e9e9e8]'
+                                    ? 'bg-[#e5f9e7] text-[#27c93f] hover:bg-[#d4f5d7]'
+                                    : 'bg-[#f1f1f0] text-[#9b9a97] hover:bg-[#e9e9e8]'
                                     }`}
                             >
                                 {conn.isActive ? '활성' : '비활성'}
@@ -150,8 +149,8 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
                                         key={provider}
                                         onClick={() => setNewConnection({ ...newConnection, provider: provider as any })}
                                         className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${newConnection.provider === provider
-                                                ? 'border-[#37352f] bg-[#37352f] text-white shadow-md'
-                                                : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'
+                                            ? 'border-[#37352f] bg-[#37352f] text-white shadow-md'
+                                            : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'
                                             }`}
                                     >
                                         {provider.charAt(0).toUpperCase() + provider.slice(1)}
