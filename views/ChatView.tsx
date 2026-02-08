@@ -513,46 +513,70 @@ const ChatView: React.FC<ChatViewProps> = ({
             {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6">
                 {messages.map((msg) => (
-                    <div key={msg.id}>
-                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div key={msg.id} className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
+                        {msg.role === 'assistant' && (
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                                {agent?.avatar ? (
+                                    <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <span className="text-sm">{agent?.emoji || <Sparkles size={14} />}</span>
+                                )}
+                            </div>
+                        )}
+
+                        <div className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                            {msg.role === 'assistant' && (
+                                <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{agent?.name || 'LifeSync AI'}</span>
+                            )}
+
                             <div
                                 className={`
-                  max-w-[85%] p-4 rounded-2xl whitespace-pre-line leading-relaxed
-                  ${msg.role === 'user'
-                                        ? 'bg-[#37352f] text-white rounded-br-md'
-                                        : 'bg-[#f7f7f5] text-[#37352f] border border-[#e9e9e8] rounded-bl-md'}
-                `}
+                                    p-3.5 rounded-2xl whitespace-pre-line leading-relaxed shadow-sm text-[15px]
+                                    ${msg.role === 'user'
+                                        ? 'bg-[#37352f] text-white rounded-br-sm'
+                                        : 'bg-white border border-[#e9e9e8] text-[#37352f] rounded-bl-sm'}
+                                `}
                             >
                                 {msg.content.split('**').map((part, i) =>
                                     i % 2 === 1 ? <strong key={i}>{part}</strong> : part
                                 )}
                             </div>
-                        </div>
 
-                        {/* Quick Replies */}
-                        {msg.role === 'assistant' && msg.quickReplies && msg.quickReplies.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-3 ml-1">
-                                {msg.quickReplies.map((reply, idx) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => handleQuickReply(reply)}
-                                        className="px-3 py-1.5 text-sm bg-white border border-[#e9e9e8] text-[#37352f] rounded-full hover:bg-[#f7f7f5] hover:border-[#d3d1cb] transition-all shadow-sm"
-                                    >
-                                        {reply}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
+                            {/* Quick Replies */}
+                            {msg.role === 'assistant' && msg.quickReplies && msg.quickReplies.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-3 ml-1">
+                                    {msg.quickReplies.map((reply, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() => handleQuickReply(reply)}
+                                            className="px-3 py-1.5 text-xs font-medium bg-white border border-[#e9e9e8] text-[#787774] rounded-lg hover:bg-[#f7f7f5] hover:text-[#37352f] transition-all"
+                                        >
+                                            {reply}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 ))}
 
                 {isProcessing && (
-                    <div className="flex justify-start">
-                        <div className="bg-[#f7f7f5] text-[#9b9a97] p-4 rounded-2xl rounded-bl-md border border-[#e9e9e8] flex items-center gap-2">
-                            <div className="flex gap-1">
-                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                <span className="w-2 h-2 bg-[#9b9a97] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                    <div className="flex w-full mb-6 justify-start items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                            {agent?.avatar ? (
+                                <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <span className="text-sm">{agent?.emoji || <Sparkles size={14} />}</span>
+                            )}
+                        </div>
+                        <div className="flex flex-col items-start">
+                            <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{agent?.name || 'LifeSync AI'}</span>
+                            <div className="bg-white text-[#9b9a97] p-4 rounded-2xl rounded-bl-sm border border-[#e9e9e8] flex items-center gap-2 shadow-sm">
+                                <div className="flex gap-1">
+                                    <span className="w-1.5 h-1.5 bg-[#d3d1cb] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                    <span className="w-1.5 h-1.5 bg-[#d3d1cb] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                    <span className="w-1.5 h-1.5 bg-[#d3d1cb] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                </div>
                             </div>
                         </div>
                     </div>
