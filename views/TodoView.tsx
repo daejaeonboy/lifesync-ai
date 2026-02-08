@@ -253,7 +253,13 @@ const SortableList = ({
           />
         ) : (
           <h3
-            className="font-medium text-lg text-[#1f1f1f]"
+            className="font-medium text-lg text-[#1f1f1f] cursor-text"
+            onClick={(e) => {
+              e.stopPropagation();
+              startEditingList(list);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            title="클릭하여 제목 수정"
           >
             {list.title}
           </h3>

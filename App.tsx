@@ -14,6 +14,8 @@ import ChatView from './views/ChatView';
 import AuthView from './views/AuthView';
 import LandingView from './views/LandingView';
 import { generateCommunityPosts } from './utils/triggerEngine';
+import { getActiveGeminiConfig } from './utils/aiConfig';
+import { normalizeKoreanText } from './utils/encodingFix';
 
 // Mock Data Loaders (In a real app, this would be an API or more robust local storage)
 const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
@@ -64,7 +66,10 @@ const App: React.FC = () => {
     return Array.isArray(stored) ? stored : [];
   });
   const [todoLists, setTodoLists] = useState<TodoList[]>(() => {
-    const stored = loadFromStorage<TodoList[]>('ls_todo_lists', []);
+    const stored = loadFromStorage<TodoList[]>('ls_todo_lists', []).map(list => ({
+      ...list,
+      title: normalizeKoreanText(list.title),
+    }));
     // Migration: Force reset to default single list if we detect multiple lists (old default was 5, user might have added more)
     // heuristic: if length > 1, it's likely old data or user custom data that needs migration to "default state" as requested.
     // To play it safe for "all users", we usually wouldn't wipe, but the USER requested "make the modified content the default state" implying a reset.
@@ -88,28 +93,55 @@ const App: React.FC = () => {
 
   // Community Board State
   const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => loadFromStorage('ls_community', []));
-  const [aiAgents, setAiAgents] = useState<AIAgent[]>(() => loadFromStorage('ls_agents', DEFAULT_AGENTS));
+  const [aiAgents, setAiAgents] = useState<AIAgent[]>(() => {
+    const stored = loadFromStorage<AIAgent[]>('ls_agents', DEFAULT_AGENTS);
+    return stored.map(agent => ({
+      ...agent,
+      name: normalizeKoreanText(agent.name),
+      role: normalizeKoreanText(agent.role),
+      personality: normalizeKoreanText(agent.personality),
+    }));
+  });
 
   // Activity Log & Settings
   const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => loadFromStorage('ls_activity', []));
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const storedSettings = loadFromStorage<any>('ls_settings', { autoAiReactions: true, chatActionConfirm: true, apiConnections: [] });
+    const storedSettings = loadFromStorage<any>('ls_settings', {
+      autoAiReactions: true,
+      chatActionConfirm: true,
+      apiConnections: [],
+      activeConnectionId: undefined
+    });
+
+    if (!Array.isArray(storedSettings.apiConnections)) {
+      storedSettings.apiConnections = [];
+    }
+
     // Backward compatibility migration: If geminiApiKey exists but no connections, create one
     if (storedSettings.geminiApiKey && (!storedSettings.apiConnections || storedSettings.apiConnections.length === 0)) {
       storedSettings.apiConnections = [{
         id: 'legacy_gemini',
         provider: 'gemini',
-        modelName: 'Gemini Pro',
+        modelName: 'gemini-1.5-flash',
         apiKey: storedSettings.geminiApiKey,
         isActive: true
       }];
+      storedSettings.activeConnectionId = 'legacy_gemini';
     }
+
+    if (!storedSettings.activeConnectionId) {
+      const firstActive = storedSettings.apiConnections.find((c: any) => c.isActive);
+      storedSettings.activeConnectionId = firstActive?.id;
+    }
+
     return storedSettings;
   });
 
   const [calendarTags, setCalendarTags] = useState<CalendarTag[]>(() => {
-    const stored = loadFromStorage('ls_calendar_tags', []);
-    if (stored && Array.isArray(stored) && stored.length > 0) return stored;
+    const stored = loadFromStorage<CalendarTag[]>('ls_calendar_tags', []);
+    if (stored && Array.isArray(stored) && stored.length > 0) {
+      return stored.map(tag => ({ ...tag, name: normalizeKoreanText(tag.name) }));
+    }
     return DEFAULT_TAGS;
   });
 
@@ -117,7 +149,10 @@ const App: React.FC = () => {
     const stored = loadFromStorage<JournalCategory[]>('ls_journal_categories', []);
     if (stored && Array.isArray(stored) && stored.length > 0) {
       // Migration: Rename AI to 메모장 if present
-      const migrated = stored.map(c => c.name === 'AI' ? { ...c, name: '메모장' } : c);
+      const migrated = stored.map(c => {
+        const normalizedName = normalizeKoreanText(c.name);
+        return normalizedName === 'AI' ? { ...c, name: '메모장' } : { ...c, name: normalizedName };
+      });
       return migrated;
     }
     return [{ id: 'ai', name: '메모장' }];
@@ -128,7 +163,8 @@ const App: React.FC = () => {
     const stored = loadFromStorage<JournalCategory[]>('ls_journal_categories', []);
     if (stored && Array.isArray(stored) && stored.length > 0) {
       const first = stored[0];
-      return first.name === 'AI' ? '메모장' : first.name;
+      const normalizedName = normalizeKoreanText(first.name);
+      return normalizedName === 'AI' ? '메모장' : normalizedName;
     }
     return '메모장';
   });
@@ -147,11 +183,13 @@ const App: React.FC = () => {
   const [editingAiAgentId, setEditingAiAgentId] = useState<string | null>(null);
   const [editingAiAgentName, setEditingAiAgentName] = useState('');
   const [activeAiAgentMenu, setActiveAiAgentMenu] = useState<string | null>(null);
+  const activeGeminiConfig = getActiveGeminiConfig(settings);
 
 
   // Undo Toast
   const undoRef = useRef<null | (() => void)>(null);
   const [undoToast, setUndoToast] = useState<{ id: string; label: string } | null>(null);
+  const scheduledPostKeyRef = useRef<string | null>(null);
 
   // Persistence Effects
   useEffect(() => saveToStorage('ls_events', events), [events]);
@@ -317,9 +355,17 @@ const App: React.FC = () => {
       return;
     }
 
-    if (dbTodoLists) setTodoLists(dbTodoLists);
+    if (dbTodoLists) {
+      setTodoLists(
+        dbTodoLists.map((list: any) => ({ ...list, title: normalizeKoreanText(list.title) }))
+      );
+    }
     if (dbTodos) setTodos(dbTodos);
-    if (dbJournalCategories) setJournalCategories(dbJournalCategories);
+    if (dbJournalCategories) {
+      setJournalCategories(
+        dbJournalCategories.map((category: any) => ({ ...category, name: normalizeKoreanText(category.name) }))
+      );
+    }
     if (dbJournalEntries) setEntries(dbJournalEntries);
     if (dbEvents) setEvents(dbEvents);
     if (dbPosts) setCommunityPosts(dbPosts);
@@ -398,6 +444,22 @@ const App: React.FC = () => {
   const triggerAI = (context: TriggerContext) => {
     if (!settings.autoAiReactions) return;
 
+    const enrichedContext: TriggerContext = {
+      ...context,
+      data: {
+        ...context.data,
+        pendingTodos: todos.filter(t => !t.completed).length,
+        completedTodos: todos.filter(t => t.completed).length,
+        totalEvents: events.length,
+        recentJournal: entries.slice(0, 3).map(entry => ({
+          title: entry.title || '',
+          content: (entry.content || '').slice(0, 280),
+          mood: entry.mood,
+          date: entry.date,
+        })),
+      },
+    };
+
     const updateUsage = (stats: ApiUsageStats) => {
       setSettings(prev => ({
         ...prev,
@@ -409,8 +471,56 @@ const App: React.FC = () => {
       }));
     };
 
-    generateCommunityPosts(context, aiAgents, addCommunityPost, settings.geminiApiKey, updateUsage);
+    generateCommunityPosts(
+      enrichedContext,
+      aiAgents,
+      addCommunityPost,
+      activeGeminiConfig?.apiKey,
+      updateUsage,
+      activeGeminiConfig?.modelName
+    );
   };
+
+  useEffect(() => {
+    const FOUR_HOURS = 4;
+    const storageKey = 'ls_last_scheduled_post_key';
+
+    const getLocalBucketKey = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const bucketHour = Math.floor(date.getHours() / FOUR_HOURS) * FOUR_HOURS;
+      const hour = String(bucketHour).padStart(2, '0');
+      return `${year}-${month}-${day}T${hour}`;
+    };
+
+    const maybeTriggerScheduledDigest = () => {
+      const now = new Date();
+      const key = getLocalBucketKey(now);
+      const saved = localStorage.getItem(storageKey);
+
+      if (saved === key || scheduledPostKeyRef.current === key) return;
+
+      scheduledPostKeyRef.current = key;
+      localStorage.setItem(storageKey, key);
+
+      triggerAI({
+        trigger: 'scheduled_digest',
+        data: {
+          slot: `every_${FOUR_HOURS}_hours`,
+          date: now.toISOString(),
+        },
+      });
+    };
+
+    const tick = () => {
+      maybeTriggerScheduledDigest();
+    };
+
+    tick();
+    const intervalId = setInterval(tick, 60_000);
+    return () => clearInterval(intervalId);
+  }, [settings.autoAiReactions, activeGeminiConfig?.apiKey, entries, events, todos, aiAgents]);
 
   const addTodoList = async (title: string) => {
     const trimmed = title.trim();
@@ -889,6 +999,28 @@ const App: React.FC = () => {
     });
   };
 
+  const requestAiCommentForEntry = (entry: Pick<JournalEntry, 'id' | 'title' | 'content' | 'mood'>) => {
+    import('./utils/triggerEngine').then(({ generateJournalComment }) => {
+      generateJournalComment(
+        { title: entry.title, content: entry.content, mood: entry.mood },
+        events,
+        todos,
+        aiAgents,
+        (comment) => addJournalComment(entry.id, comment),
+        activeGeminiConfig?.apiKey,
+        (stats) => setSettings(prev => ({
+          ...prev,
+          apiUsage: {
+            totalRequests: (prev.apiUsage?.totalRequests || 0) + stats.totalRequests,
+            totalTokens: (prev.apiUsage?.totalTokens || 0) + stats.totalTokens,
+            lastRequestDate: stats.lastRequestDate,
+          }
+        })),
+        activeGeminiConfig?.modelName
+      );
+    });
+  };
+
   const addEntry = async (title: string, content: string, category: string = '메모장', mood: string = 'neutral') => {
     const categoryObj = journalCategories.find(c => c.name === category);
     const newEntry: JournalEntry = {
@@ -943,8 +1075,13 @@ const App: React.FC = () => {
       },
     });
 
-    // Auto-request AI comment
-    handleRequestAiComment(newEntry.id);
+    // Auto-request AI comment immediately with freshly created entry payload.
+    requestAiCommentForEntry({
+      id: newEntry.id,
+      title: newEntry.title,
+      content: newEntry.content,
+      mood: newEntry.mood,
+    });
   };
 
   const deleteEntry = async (id: string) => {
@@ -1006,24 +1143,11 @@ const App: React.FC = () => {
   const handleRequestAiComment = (entryId: string) => {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
-
-    import('./utils/triggerEngine').then(({ generateJournalComment }) => {
-      generateJournalComment(
-        { title: entry.title, content: entry.content, mood: entry.mood },
-        events,
-        todos,
-        aiAgents,
-        (comment) => addJournalComment(entryId, comment),
-        settings.geminiApiKey,
-        (stats) => setSettings(prev => ({
-          ...prev,
-          apiUsage: {
-            totalRequests: (prev.apiUsage?.totalRequests || 0) + stats.totalRequests,
-            totalTokens: (prev.apiUsage?.totalTokens || 0) + stats.totalTokens,
-            lastRequestDate: stats.lastRequestDate,
-          }
-        }))
-      );
+    requestAiCommentForEntry({
+      id: entry.id,
+      title: entry.title,
+      content: entry.content,
+      mood: entry.mood,
     });
   };
 
@@ -1093,7 +1217,7 @@ const App: React.FC = () => {
           />
         );
       case 'chat':
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} agent={aiAgents[0]} />;
+        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} agent={aiAgents[0]} onUserMessage={(text) => triggerAI({ trigger: 'chat_message', data: { text } })} />;
       case 'board':
         return (
           <CommunityBoardView
@@ -1128,7 +1252,7 @@ const App: React.FC = () => {
           />
         );
       default:
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} />;
+        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} agent={aiAgents[0]} onUserMessage={(text) => triggerAI({ trigger: 'chat_message', data: { text } })} />;
     }
   };
 

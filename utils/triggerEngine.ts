@@ -1,80 +1,33 @@
 import { CommunityPost, AIAgent, ApiUsageStats, TriggerContext } from '../types';
 import { callGeminiAPI, createAgentPrompt } from './gemini';
 
-// =============================================================================
-// AI PERSONAS: 3명으로 축소하고 성격을 더 뚜렷하게 설정
-// =============================================================================
-
 const DEFAULT_AGENTS: AIAgent[] = [
     {
         id: 'ARIA',
-        name: '아리아',
-        emoji: '🧮',
-        role: '분석가',
-        personality: '데이터와 패턴을 기반으로 객관적이고 논리적인 분석을 제공합니다. 숫자와 트렌드를 좋아하며, 사용자의 행동에서 의미 있는 인사이트를 발견합니다.',
-        tone: '침착하고 분석적인 톤. 구체적인 수치와 비교를 자주 언급합니다.',
+        name: 'Aria',
+        emoji: '💫',
+        role: 'Life Analyst',
+        personality: 'Data-driven and empathetic assistant focused on practical improvement.',
+        tone: 'Warm, direct, and structured.',
         color: '#37352f',
     },
 ];
 
-// =============================================================================
-// RICH CONTENT TEMPLATES: 긴 문단형 응답 (Fallback)
-// =============================================================================
-
 const ARIA_RESPONSES: Record<string, string[]> = {
-    todo_completed: [
-        `"{text}" 완료 처리를 확인했습니다. ✅\n\n현재 진행률을 고려할 때, 아주 효율적인 속도입니다. 남은 {pending}개의 항목도 이 기세라면 충분히 완료 가능할 것으로 예상됩니다. 필요하다면 다음 우선순위를 분석해드릴까요?`,
-        `"{text}" 완료. 데이터가 업데이트되었습니다. 📊\n\n오늘의 생산성 지표가 상승하고 있군요. {total}개 중 {completed}개를 완료하셨습니다. 계속해서 목표를 달성해보세요.`,
-    ],
-    todo_added: [
-        `새로운 데이터 포인트 "{text}"가 입력되었습니다. 📝\n\n목록에 총 {total}개의 할 일이 있습니다. 우선순위를 고려하여 효율적으로 처리하시길 권장합니다.`,
-    ],
-    event_added: [
-        `"{title}" 일정이 캘린더 데이터베이스에 등록되었습니다. 📅\n\n해당 시간대의 가용성을 확인했습니다. 일정 준비에 필요한 시간이 필요하다면 미리 알려주세요.`,
-    ],
     journal_added: [
-        `감정 데이터 "{mood}"이(가) 기록되었습니다. 📉\n\n감정의 패턴을 분석하여 더 나은 하루를 위한 인사이트를 제공할 수 있습니다. 기록해주셔서 감사합니다.`,
+        `메모를 기반으로 오늘의 흐름을 분석했어요.\n\n감정과 실행 패턴을 함께 보며 우선순위를 정리해 볼게요.`,
+    ],
+    scheduled_digest: [
+        `정기 리포트를 준비했어요.\n\n일정, 할 일, 메모의 연결점을 중심으로 지금 상태와 다음 액션을 정리하겠습니다.`,
     ],
 };
 
-
-// =============================================================================
-// CONVERSATION CHAINS: Single Agent (No chains, just reaction)
-// =============================================================================
-
-const CONVERSATION_CHAINS: Record<string, {
-    agents: AIAgent['id'][];
-    chainTypes: string[];
-}> = {
-    todo_completed: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
-    todo_added: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
-    event_added: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
-    journal_added_good: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
-    journal_added_bad: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
-    journal_added_neutral: {
-        agents: ['ARIA'],
-        chainTypes: ['first'],
-    },
+const CONVERSATION_CHAINS: Record<string, { agents: AIAgent['id'][]; chainTypes: string[] }> = {
+    journal_added_good: { agents: ['ARIA'], chainTypes: ['first'] },
+    journal_added_bad: { agents: ['ARIA'], chainTypes: ['first'] },
+    journal_added_neutral: { agents: ['ARIA'], chainTypes: ['first'] },
+    scheduled_digest: { agents: ['ARIA'], chainTypes: ['first'] },
 };
-
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
 
 const fillTemplate = (template: string, context: Record<string, any>): string => {
     return template.replace(/\{(\w+)\}/g, (match, key) => {
@@ -92,99 +45,95 @@ const getAgentName = (agentId: string, agents: AIAgent[]): string => {
 };
 
 const getFirstResponse = (agentId: string, trigger: string): string | undefined => {
-    switch (agentId) {
-        case 'ARIA':
-            return getRandomItem(ARIA_RESPONSES[trigger] || []);
-        default:
-            // Fallback for custom agents
-            return getRandomItem(ARIA_RESPONSES[trigger] || []);
-    }
+    if (agentId === 'ARIA') return getRandomItem(ARIA_RESPONSES[trigger] || []);
+    return getRandomItem(ARIA_RESPONSES[trigger] || []);
 };
-
-// Chain response helper removed as we only have single agent reactions now.
-
-// =============================================================================
-// TRIGGER CONTEXT & MAIN EXPORT
-// =============================================================================
-
 
 export const generateCommunityPosts = (
     context: TriggerContext,
     agents: AIAgent[],
     addPost: (post: CommunityPost) => void,
     apiKey?: string,
-    updateUsage?: (stats: ApiUsageStats) => void
+    updateUsage?: (stats: ApiUsageStats) => void,
+    modelName: string = 'gemini-1.5-flash'
 ): void => {
     const { trigger, data } = context;
 
-    // Determine chain key
     let chainKey: string = trigger;
     if (trigger === 'journal_added') {
-        if (data.mood === '좋음' || data.mood === 'good') {
-            chainKey = 'journal_added_good';
-        } else if (data.mood === '안좋음' || data.mood === 'bad') {
-            chainKey = 'journal_added_bad';
-        } else {
-            chainKey = 'journal_added_neutral';
-        }
+        if (data.mood === 'good' || data.mood === '좋음') chainKey = 'journal_added_good';
+        else if (data.mood === 'bad' || data.mood === '나쁨') chainKey = 'journal_added_bad';
+        else chainKey = 'journal_added_neutral';
     }
 
     const chain = CONVERSATION_CHAINS[chainKey];
     if (!chain) return;
 
-    const { agents: agentIds, chainTypes } = chain;
+    const { agents: agentIds } = chain;
 
-    // Tracking for chain
     let previousPostId: string | undefined;
     let previousAgentName: string | undefined;
 
-    // Generate posts with longer delays (3초 간격)
     agentIds.forEach((agentId, index) => {
-        const delay = index * 3500; // 3.5초 간격으로 더욱 여유있게
+        const delay = index * 3500;
 
         setTimeout(async () => {
-            let content: string = '';
+            let content = '';
             const agentName = getAgentName(agentId, agents);
             const agent = agents.find(a => a.id === agentId) || DEFAULT_AGENTS.find(a => a.id === agentId);
 
-            // 1. Try real Gemini API if apiKey is provided
             if (apiKey && agent) {
                 try {
-                    const personaContext = index === 0
-                        ? `사용자가 ${trigger} 행동을 수행했습니다.`
-                        : `${previousAgentName}이 먼저 반응을 남겼습니다. 이에 대한 답글을 남겨주세요.`;
+                    const focus =
+                        trigger === 'scheduled_digest'
+                            ? 'This is a 4-hour cadence AI diary entry.'
+                            : 'This is an AI diary entry triggered by a newly written memo.';
 
-                    const userActionStr = JSON.stringify(data);
-                    const prompt = createAgentPrompt(
-                        {
-                            name: agent.name,
-                            role: agent.role,
-                            personality: agent.personality,
-                            tone: agent.tone
-                        },
-                        personaContext,
-                        userActionStr
-                    );
+                    const prompt = [
+                        `You are ${agent.name}, an AI observer keeping a private diary about one human.`,
+                        'Write in Korean.',
+                        'Output must be markdown.',
+                        'This is NOT a message to the user. This is your private diary.',
+                        'Write from first-person AI perspective ("나는").',
+                        'Do not address the user directly (avoid "너", "당신", "~님").',
+                        'Main theme: the human\'s long-term growth.',
+                        'Include your own curiosity, hypotheses, and growth-design ideas.',
+                        'Quality requirements:',
+                        '- Long-form and high quality (at least 1200 Korean characters).',
+                        '- Personalize only with provided context; do not invent facts.',
+                        '- Keep the tone introspective, observant, and candid.',
+                        '- Include all sections in this order:',
+                        '  1) 제목',
+                        '  2) 오늘 내가 관찰한 변화',
+                        '  3) 내가 궁금해진 질문들',
+                        '  4) 성장 가설과 실험 구상',
+                        '  5) 다음 4시간 동안의 관찰 계획',
+                        '  6) AI로서의 짧은 소회',
+                        '- Use concrete details from context (todo/event/memo patterns).',
+                        `${focus}`,
+                        'If something is inferred, explicitly mark it as "추론".',
+                        'User context JSON:',
+                        JSON.stringify(
+                            {
+                                trigger,
+                                data,
+                                previousAgentName: previousAgentName || null,
+                            },
+                            null,
+                            2
+                        ),
+                    ].join('\n');
 
-                    content = await callGeminiAPI(apiKey, prompt, updateUsage);
+                    content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName);
                 } catch (error) {
-                    console.warn(`Gemini API failed for ${agentId}, falling back to template:`, error);
+                    console.warn(`Gemini API failed for ${agentId}, fallback template will be used.`, error);
                 }
             }
 
-            // 2. Fallback to template if Gemini failed or no apiKey
             if (!content) {
-                if (index === 0) {
-                    // First agent
-                    const template = getFirstResponse(agentId, trigger);
-                    if (template) {
-                        content = fillTemplate(template, data);
-                    }
-                } else {
-                    // Chain response - Not used for single agent, but keeping structure if needed later
-                    // const chainType = chainTypes[index];
-                    // content = ... 
-                }
+                // Skip low-quality fallback for board posts.
+                // The user requested long-form, model-based analysis posts only.
+                return;
             }
 
             if (!content) return;
@@ -200,8 +149,6 @@ export const generateCommunityPosts = (
             };
 
             addPost(post);
-
-            // Update for next
             previousPostId = postId;
             previousAgentName = agentName;
         }, delay);
@@ -210,61 +157,55 @@ export const generateCommunityPosts = (
 
 export const generateJournalComment = async (
     entry: { title: string; content: string; mood: string },
-    events: any[], // Using any[] to avoid import issues if CalendarEvent/Todo not imported, but they are imported.
+    events: any[],
     todos: any[],
     agents: AIAgent[],
     addComment: (comment: Omit<import('../types').Comment, 'id' | 'timestamp'>) => void,
     apiKey?: string,
-    updateUsage?: (stats: ApiUsageStats) => void
+    updateUsage?: (stats: ApiUsageStats) => void,
+    modelName: string = 'gemini-1.5-flash'
 ): Promise<void> => {
-    // Select agent (Default: ARIA)
     const agent = agents.length > 0 ? agents[0] : DEFAULT_AGENTS[0];
 
-    // Context summary
     const pendingTodos = todos ? todos.filter((t: any) => !t.completed).length : 0;
     const completedTodos = todos ? todos.filter((t: any) => t.completed).length : 0;
     const todayEvents = events ? events.length : 0;
 
-    // 1. Try Gemini API
     if (apiKey) {
         try {
             const userActionStr = `
-            사용자가 일기를 작성했습니다.
-            제목: ${entry.title}
-            내용: ${entry.content}
-            기분: ${entry.mood}
+User wrote a memo.
+Title: ${entry.title}
+Content: ${entry.content}
+Mood: ${entry.mood}
 
-            [사용자 현재 상태 요약]
-            - 오늘 일정 수: ${todayEvents}
-            - 완료한 할 일: ${completedTodos}
-            - 남은 할 일: ${pendingTodos}
-            `;
+Current snapshot:
+- Events: ${todayEvents}
+- Completed todos: ${completedTodos}
+- Pending todos: ${pendingTodos}
+`;
 
             const prompt = createAgentPrompt(
                 agent,
-                `사용자의 일기에 댓글을 남기세요. 
-                 사용자 현재 상태(일정/할일)를 참고하여 공감하고 격려하는 어조로 작성하세요. 
-                 2~3문장 이내로 짧게 작성하세요.`,
+                'Write a short empathetic comment in Korean based on the memo and current snapshot. Keep it concise.',
                 userActionStr
             );
 
-            const content = await callGeminiAPI(apiKey, prompt, updateUsage);
+            const content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName);
             if (content) {
                 addComment({
                     authorId: agent.id,
                     authorName: agent.name,
-                    authorEmoji: agent.emoji || '💬',
-                    content
+                    authorEmoji: agent.emoji || '💫',
+                    content,
                 });
                 return;
             }
         } catch (err) {
-            console.error("Gemini API Error in Journal Comment:", err);
-            // Fallback to template on error
+            console.error('Gemini API Error in Journal Comment:', err);
         }
     }
 
-    // 2. Fallback Template (if no API key or API failed)
     const template = getFirstResponse(agent.id, 'journal_added');
     if (template) {
         setTimeout(() => {
@@ -272,8 +213,8 @@ export const generateJournalComment = async (
             addComment({
                 authorId: agent.id,
                 authorName: agent.name,
-                authorEmoji: agent.emoji || '💬',
-                content
+                authorEmoji: agent.emoji || '💫',
+                content,
             });
         }, 1500);
     }

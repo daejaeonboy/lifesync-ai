@@ -5,7 +5,8 @@ export const generateLifeInsight = async (
   apiKey: string,
   events: CalendarEvent[],
   todos: Todo[],
-  journalEntries: JournalEntry[]
+  journalEntries: JournalEntry[],
+  modelName: string = 'gemini-1.5-flash'
 ): Promise<AiPost> => {
   if (!apiKey) {
     throw new Error("API Key가 설정되지 않았습니다. 설정 > AI 페르소나 설정에서 키를 입력해주세요.");
@@ -47,7 +48,7 @@ export const generateLifeInsight = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: modelName,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -89,7 +90,8 @@ export const generateChatResponse = async (
   events: CalendarEvent[],
   todos: Todo[],
   journalEntries: JournalEntry[],
-  userName: string
+  userName: string,
+  modelName: string = 'gemini-1.5-flash'
 ): Promise<string> => {
   if (!apiKey) {
     throw new Error("API Key가 필요합니다.");
@@ -122,18 +124,13 @@ export const generateChatResponse = async (
     `;
 
   try {
-    // Prepare contents for chat
-    // Map history to Google GenAI format: { role: 'user' | 'model', parts: [{ text: ... }] }
-    // The last message is also part of history in the input here from the caller?
-    // Let's assume messageHistory contains the full conversation including the latest user message.
-
     const validContents = messageHistory.map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content }]
     }));
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-lite-preview-02-05', // Using a fast model for chat
+      model: modelName,
       contents: validContents,
       config: {
         systemInstruction: { parts: [{ text: systemInstruction }] },

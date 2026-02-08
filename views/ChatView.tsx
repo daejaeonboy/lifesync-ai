@@ -4,6 +4,7 @@ import { generateLifeInsight, generateChatResponse } from '../services/geminiSer
 import { Sparkles, ChevronRight } from '../components/Icons';
 import { format, parseISO, addDays, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { getActiveGeminiConfig } from '../utils/aiConfig';
 
 // Types for Chat Messages
 interface ChatMessage {
@@ -33,6 +34,7 @@ interface ChatViewProps {
     settings: AppSettings;
     onUpdateSettings?: (settings: AppSettings) => void;
     agent?: AIAgent;
+    onUserMessage?: (text: string) => void;
 }
 
 // Helper: Get time-based greeting
@@ -50,7 +52,14 @@ const getTimeBasedGreeting = (): string => {
 const getTodaySummary = (events: CalendarEvent[], todos: Todo[]): string => {
     const pendingTodos = todos.filter(t => !t.completed).length;
     const today = new Date();
-    const todayEvents = events.filter(e => isSameDay(parseISO(e.date), today)).length;
+    const todayEvents = events.filter(e => {
+        if (!e.date) return false;
+        try {
+            return isSameDay(parseISO(e.date), today);
+        } catch {
+            return false;
+        }
+    }).length;
 
     if (todayEvents === 0 && pendingTodos === 0) {
         return '오늘은 예정된 일정이나 할 일이 없어요. 여유로운 하루를 보내세요!';
@@ -76,7 +85,10 @@ const ChatView: React.FC<ChatViewProps> = ({
     settings,
     onUpdateSettings,
     agent,
+    onUserMessage,
 }) => {
+    const activeGeminiConfig = getActiveGeminiConfig(settings);
+
     // Check if this is first visit (onboarding flow)
     const [userName, setUserName] = useState<string>(() => localStorage.getItem('ls_userName') || '');
     const [onboardingStep, setOnboardingStep] = useState<number>(() => userName ? -1 : 0);
@@ -243,10 +255,16 @@ const ChatView: React.FC<ChatViewProps> = ({
                 break;
             case 'generate_insight':
                 try {
-                    if (!settings.geminiApiKey) {
+                    if (!activeGeminiConfig?.apiKey) {
                         throw new Error('API Key가 필요해요.');
                     }
-                    const newPost = await generateLifeInsight(settings.geminiApiKey, events, todos, entries);
+                    const newPost = await generateLifeInsight(
+                        activeGeminiConfig.apiKey,
+                        events,
+                        todos,
+                        entries,
+                        activeGeminiConfig.modelName
+                    );
                     onAddPost(newPost);
 
                     // Update Usage Stats (Approximate token count based on input/output length)
@@ -268,7 +286,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                     const errorMessage: ChatMessage = {
                         id: crypto.randomUUID(),
                         role: 'assistant',
-                        content: settings.geminiApiKey ? 'AI 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 😢' : 'AI 분석을 하려면 먼저 **설정**에서 **Google Gemini API Key**를 등록해주세요! 🔑\n\n(무료로 발급받을 수 있어요)',
+                        content: activeGeminiConfig?.apiKey ? 'AI 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 😢' : 'AI 분석을 하려면 먼저 **설정 > API 연결 설정**에서 Gemini API와 모델을 선택해주세요! 🔑',
                         timestamp: new Date(),
                         quickReplies: ['설정하러 갈래', '괜찮아']
                     };
@@ -398,6 +416,14 @@ const ChatView: React.FC<ChatViewProps> = ({
         const isConfirm = pendingAction && ['실행', '확인', '네', '응', '좋아'].includes(trimmedMessage);
         const isCancel = pendingAction && ['취소', '아니', '그만', '나중에'].includes(trimmedMessage);
 
+        if (!isConfirm && !isCancel) {
+            try {
+                onUserMessage?.(trimmedMessage);
+            } catch (error) {
+                console.error('onUserMessage callback failed:', error);
+            }
+        }
+
         const userMessage: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'user',
@@ -483,7 +509,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             setIsProcessing(false);
         } else {
             // General Chat / Fallback with API
-            if (settings.geminiApiKey) {
+            if (activeGeminiConfig?.apiKey) {
                 try {
                     // Create history for API (exclude current processing message which is already in 'messages' state? No, handleSend adds it to state)
                     // Wait, setMessages is async. 'messages' variable might not have the new user message yet.
@@ -492,12 +518,13 @@ const ChatView: React.FC<ChatViewProps> = ({
                     const history = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
 
                     const reply = await generateChatResponse(
-                        settings.geminiApiKey,
+                        activeGeminiConfig.apiKey,
                         history,
                         events,
                         todos,
                         entries,
-                        userName
+                        userName,
+                        activeGeminiConfig.modelName
                     );
 
                     const assistantMessage: ChatMessage = {

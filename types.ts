@@ -120,6 +120,7 @@ export interface AppSettings {
   chatActionConfirm: boolean;
   geminiApiKey?: string; // @deprecated use apiConnections
   apiConnections: ApiConnection[];
+  activeConnectionId?: string;
   apiUsage?: ApiUsageStats;
 }
 
@@ -139,17 +140,22 @@ export interface ApiUsageStats {
 export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings' | 'personas';
 
 export interface TriggerContext {
-  trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'chat_message';
+  trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'chat_message' | 'scheduled_digest';
   data: {
     text?: string;
     title?: string;
     date?: string;
     mood?: string;
+    slot?: string;
     completed?: number;
     pending?: number;
     total?: number;
     completionRate?: number;
     nextTodo?: string;
     weekCount?: number;
+    pendingTodos?: number;
+    completedTodos?: number;
+    totalEvents?: number;
+    recentJournal?: { title: string; content: string; mood: string; date: string }[];
   };
 }

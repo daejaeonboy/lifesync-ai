@@ -1,40 +1,51 @@
 import React, { useState } from 'react';
-import { AiPost, CalendarEvent, Todo, JournalEntry } from '../types';
+import { AiPost, CalendarEvent, Todo, JournalEntry, AppSettings } from '../types';
+import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, Layout, CalendarIcon, CheckSquare, BookOpen, ChevronRight, Check } from '../components/Icons';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { getActiveGeminiConfig } from '../utils/aiConfig';
 
 interface BoardViewProps {
   posts: AiPost[];
   events: CalendarEvent[];
   todos: Todo[];
   entries: JournalEntry[];
+  settings: AppSettings;
   onAddPost: (post: AiPost) => void;
   onDeletePost: (id: string) => void;
   onToggleTodo: (id: string) => void;
 }
 
-const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, onAddPost, onDeletePost, onToggleTodo }) => {
+const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, settings, onAddPost, onDeletePost, onToggleTodo }) => {
   const [isGenerating, setIsGenerating] = useState(false);
+  const activeGeminiConfig = getActiveGeminiConfig(settings);
 
   const pendingTodos = todos.filter(t => !t.completed).slice(0, 3);
   const todayEvents = events.slice(0, 3); // In real app, filter by today
 
   const handleGenerateInsight = async () => {
+    if (!activeGeminiConfig?.apiKey) {
+      alert('API 연결이 설정되지 않았습니다. 설정 > API 연결 설정에서 Gemini 모델을 선택해주세요.');
+      return;
+    }
+
     setIsGenerating(true);
-    // Simulation of AI generation
-    setTimeout(() => {
-      const newPost: AiPost = {
-        id: crypto.randomUUID(),
-        title: '오늘의 생산성 리포트',
-        content: `최근 업무 관련 일정이 3건 완수되었습니다. 집중력이 매우 좋은 하루였네요! 다만, 일기장에 '피곤함' 키워드가 감지되었습니다. 오늘은 30분 일찍 취침하는 것을 추천드립니다.`,
-        date: new Date().toISOString(),
-        tags: ['생산성', '건강'],
-        type: 'analysis'
-      };
+    try {
+      const newPost = await generateLifeInsight(
+        activeGeminiConfig.apiKey,
+        events,
+        todos,
+        entries,
+        activeGeminiConfig.modelName
+      );
       onAddPost(newPost);
+    } catch (error) {
+      console.error("Failed to generate insight:", error);
+      alert('인사이트 생성 중 오류가 발생했습니다.');
+    } finally {
       setIsGenerating(false);
-    }, 2000);
+    }
   };
 
   return (

@@ -20,13 +20,14 @@ interface GeminiResponse {
 export const callGeminiAPI = async (
     apiKey: string,
     prompt: string,
-    updateUsage?: (stats: ApiUsageStats) => void
+    updateUsage?: (stats: ApiUsageStats) => void,
+    modelName: string = 'gemini-1.5-flash'
 ): Promise<string> => {
     if (!apiKey) {
         throw new Error('API Key가 필요합니다.');
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     try {
         const response = await fetch(url, {
