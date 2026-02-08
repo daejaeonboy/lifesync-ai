@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings } from '../types';
+import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent } from '../types';
 import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, ChevronRight } from '../components/Icons';
 import { format, parseISO, addDays, isSameDay } from 'date-fns';
@@ -32,6 +32,7 @@ interface ChatViewProps {
     requireConfirm?: boolean;
     settings: AppSettings;
     onUpdateSettings?: (settings: AppSettings) => void;
+    agent?: AIAgent;
 }
 
 // Helper: Get time-based greeting
@@ -74,6 +75,7 @@ const ChatView: React.FC<ChatViewProps> = ({
     requireConfirm = true,
     settings,
     onUpdateSettings,
+    agent,
 }) => {
     // Check if this is first visit (onboarding flow)
     const [userName, setUserName] = useState<string>(() => localStorage.getItem('ls_userName') || '');
@@ -85,7 +87,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             return {
                 id: 'onboarding-1',
                 role: 'assistant',
-                content: `${getTimeBasedGreeting()}\n\n처음 오셨네요! 저는 **LifeSync AI**예요. 💬\n당신의 일상을 함께 정리하고 더 나은 하루를 만들어 드릴게요.\n\n먼저, 뭐라고 불러드리면 될까요?`,
+                content: `${getTimeBasedGreeting()}\n\n처음 오셨네요! 저는 ${agent?.name || 'LifeSync AI'}예요. ${agent?.emoji || '💬'}\n당신의 일상을 함께 정리하고 더 나은 하루를 만들어 드릴게요.\n\n먼저, 뭐라고 불러드리면 될까요?`,
                 timestamp: new Date(),
                 action: { type: 'onboarding' },
             };
@@ -494,12 +496,16 @@ const ChatView: React.FC<ChatViewProps> = ({
             {/* Header */}
             <div className="pt-4 pb-4 px-2 border-b border-[#f7f7f5]">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-md">
-                        <Sparkles size={20} />
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-md overflow-hidden">
+                        {agent?.avatar ? (
+                            <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                        ) : (
+                            <span className="text-xl">{agent?.emoji || <Sparkles size={20} />}</span>
+                        )}
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold tracking-tight">LifeSync AI</h1>
-                        <p className="text-xs text-[#9b9a97]">{userName ? `${userName}님의 개인 비서` : '당신의 하루를 함께해요'}</p>
+                        <h1 className="text-xl font-bold tracking-tight">{agent?.name || 'LifeSync AI'}</h1>
+                        <p className="text-xs text-[#9b9a97]">{userName ? `${userName}님의 ${agent?.role || '개인 비서'}` : '당신의 하루를 함께해요'}</p>
                     </div>
                 </div>
             </div>
