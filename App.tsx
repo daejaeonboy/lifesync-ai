@@ -990,544 +990,567 @@ const App: React.FC = () => {
         await supabase.from('journal_entries').update(dbUpdates).eq('id', id);
       }
     }
-  };
-
-  const addPost = (post: AiPost) => setPosts(prev => [post, ...prev]);
-  const deletePost = (id: string) => setPosts(prev => prev.filter(p => p.id !== id));
-
-  const addCalendarTag = () => {
-    const newTag: CalendarTag = {
-      id: crypto.randomUUID(),
-      name: '새 태그',
-      color: '#37352f'
-    };
-    setCalendarTags(prev => [...prev, newTag]);
-  };
-
-  const updateCalendarTag = (id: string, updates: Partial<CalendarTag>) => {
-    setCalendarTags(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
-  };
-
-  const deleteCalendarTag = (id: string) => {
-    if (calendarTags.length <= 1) return;
-    setCalendarTags(prev => prev.filter(t => t.id !== id));
-  };
-
-  const updateAgents = (agents: AIAgent[]) => setAiAgents(agents);
-
-  const navItems: { id: ViewState; label: string; icon: React.ElementType }[] = [
-    { id: 'chat', label: 'AI 채팅', icon: MessageCircle },
-    { id: 'board', label: 'AI 일기장', icon: Sparkles },
-    { id: 'calendar', label: '캘린더', icon: CalendarIcon },
-    { id: 'todo', label: '할 일', icon: CheckSquare },
-    { id: 'journal', label: '메모장', icon: BookOpen },
-  ];
-
-  const renderView = () => {
-    switch (currentView) {
-      case 'calendar':
-        return (
-          <CalendarView
-            events={events}
-            tags={calendarTags}
-            onAddEvent={addEvent}
-            onDeleteEvent={deleteEvent}
-            onUpdateEvent={updateEvent}
-          />
-        );
-      case 'todo':
-        return <TodoView todos={todos} lists={todoLists} onAddList={addTodoList} onUpdateList={updateTodoList} onUpdateListOrder={updateTodoListOrder} onAddTodo={addTodo} onUpdateTodo={updateTodo} onToggleTodo={toggleTodo} onDeleteTodo={deleteTodo} onDeleteList={deleteTodoList} />;
-      case 'journal':
-        return (
-          <JournalView
-            entries={entries}
-            categories={journalCategories}
-            selectedId={selectedJournalId}
-            selectedCategory={selectedJournalCategory}
-            searchQuery={journalSearchQuery}
-            onSelectId={setSelectedJournalId}
-            onSelectCategory={setSelectedJournalCategory}
-            onSearchQuery={setJournalSearchQuery}
-            onAddEntry={addEntry}
-            onUpdateEntry={updateEntry}
-            onDeleteEntry={deleteEntry}
-            onAddCategory={addJournalCategory}
-            onAddComment={addJournalComment}
-            onRequestAiComment={handleRequestAiComment}
-          />
-        );
-      case 'chat':
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} />;
-      case 'board':
-        return (
-          <CommunityBoardView
-            agents={aiAgents}
-            posts={communityPosts}
-            selectedId={selectedAiPostId}
-            onSelectId={setSelectedAiPostId}
-            selectedAgentId={selectedAiAgentId}
-            onUpdatePost={updateCommunityPost}
-            onDeletePost={deleteCommunityPost}
-            onAddComment={addCommunityComment}
-            onUpdateOrder={(newPosts) => setCommunityPosts(newPosts)}
-          />
-        );
-      case 'settings':
-        return (
-          <PersonaSettingsView
-            agents={aiAgents}
-            onUpdateAgents={updateAgents}
-            settings={settings}
-            onUpdateSettings={setSettings}
-            onExportData={handleExportData}
-            onClearAllData={handleClearAllData}
-            onClearActivity={handleClearActivity}
-          />
-        );
-      case 'api-settings':
-        return (
-          <ApiSettingsView
-            settings={settings}
-            onUpdateSettings={setSettings}
-          />
-        );
-      default:
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} />;
-    }
-  };
-
-  const headerLabel = navItems.find(i => i.id === currentView)?.label || 'Dashboard';
-
-  if (showAuth && !currentUser) {
-    return (
-      <div className="min-h-screen bg-white relative animate-in fade-in duration-300">
-        <button
-          onClick={() => setShowAuth(false)}
-          className="absolute top-8 right-8 z-[110] p-2 text-[#787774] hover:text-[#37352f] hover:bg-[#efefef] rounded-full transition-all"
-          aria-label="닫기"
-        >
-          <X size={24} />
-        </button>
-        <AuthView initialMode={authMode} onLogin={(user) => {
-          setCurrentUser(user);
-          setShowAuth(false);
-        }} />
-      </div>
-    );
   }
+};
 
+const handleRequestAiComment = (entryId: string) => {
+  const entry = entries.find(e => e.id === entryId);
+  if (!entry) return;
 
+  import('./utils/triggerEngine').then(({ generateJournalComment }) => {
+    generateJournalComment(
+      { title: entry.title, content: entry.content, mood: entry.mood },
+      aiAgents,
+      (comment) => addJournalComment(entryId, comment),
+      settings.geminiApiKey,
+      (stats) => setSettings(prev => ({
+        ...prev,
+        apiUsage: {
+          totalRequests: (prev.apiUsage?.totalRequests || 0) + stats.totalRequests,
+          totalTokens: (prev.apiUsage?.totalTokens || 0) + stats.totalTokens,
+          lastRequestDate: stats.lastRequestDate,
+        }
+      }))
+    );
+  });
+};
 
+const addPost = (post: AiPost) => setPosts(prev => [post, ...prev]);
+const deletePost = (id: string) => setPosts(prev => prev.filter(p => p.id !== id));
+
+const addCalendarTag = () => {
+  const newTag: CalendarTag = {
+    id: crypto.randomUUID(),
+    name: '새 태그',
+    color: '#37352f'
+  };
+  setCalendarTags(prev => [...prev, newTag]);
+};
+
+const updateCalendarTag = (id: string, updates: Partial<CalendarTag>) => {
+  setCalendarTags(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+};
+
+const deleteCalendarTag = (id: string) => {
+  if (calendarTags.length <= 1) return;
+  setCalendarTags(prev => prev.filter(t => t.id !== id));
+};
+
+const updateAgents = (agents: AIAgent[]) => setAiAgents(agents);
+
+const navItems: { id: ViewState; label: string; icon: React.ElementType }[] = [
+  { id: 'chat', label: 'AI 채팅', icon: MessageCircle },
+  { id: 'board', label: 'AI 일기장', icon: Sparkles },
+  { id: 'calendar', label: '캘린더', icon: CalendarIcon },
+  { id: 'todo', label: '할 일', icon: CheckSquare },
+  { id: 'journal', label: '메모장', icon: BookOpen },
+];
+
+const renderView = () => {
+  switch (currentView) {
+    case 'calendar':
+      return (
+        <CalendarView
+          events={events}
+          tags={calendarTags}
+          onAddEvent={addEvent}
+          onDeleteEvent={deleteEvent}
+          onUpdateEvent={updateEvent}
+        />
+      );
+    case 'todo':
+      return <TodoView todos={todos} lists={todoLists} onAddList={addTodoList} onUpdateList={updateTodoList} onUpdateListOrder={updateTodoListOrder} onAddTodo={addTodo} onUpdateTodo={updateTodo} onToggleTodo={toggleTodo} onDeleteTodo={deleteTodo} onDeleteList={deleteTodoList} />;
+    case 'journal':
+      return (
+        <JournalView
+          entries={entries}
+          categories={journalCategories}
+          selectedId={selectedJournalId}
+          selectedCategory={selectedJournalCategory}
+          searchQuery={journalSearchQuery}
+          onSelectId={setSelectedJournalId}
+          onSelectCategory={setSelectedJournalCategory}
+          onSearchQuery={setJournalSearchQuery}
+          onAddEntry={addEntry}
+          onUpdateEntry={updateEntry}
+          onDeleteEntry={deleteEntry}
+          onAddCategory={addJournalCategory}
+          onAddComment={addJournalComment}
+          onRequestAiComment={handleRequestAiComment}
+        />
+      );
+    case 'chat':
+      return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} />;
+    case 'board':
+      return (
+        <CommunityBoardView
+          agents={aiAgents}
+          posts={communityPosts}
+          selectedId={selectedAiPostId}
+          onSelectId={setSelectedAiPostId}
+          selectedAgentId={selectedAiAgentId}
+          onUpdatePost={updateCommunityPost}
+          onDeletePost={deleteCommunityPost}
+          onAddComment={addCommunityComment}
+          onUpdateOrder={(newPosts) => setCommunityPosts(newPosts)}
+        />
+      );
+    case 'settings':
+      return (
+        <PersonaSettingsView
+          agents={aiAgents}
+          onUpdateAgents={updateAgents}
+          settings={settings}
+          onUpdateSettings={setSettings}
+          onExportData={handleExportData}
+          onClearAllData={handleClearAllData}
+          onClearActivity={handleClearActivity}
+        />
+      );
+    case 'api-settings':
+      return (
+        <ApiSettingsView
+          settings={settings}
+          onUpdateSettings={setSettings}
+        />
+      );
+    default:
+      return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} />;
+  }
+};
+
+const headerLabel = navItems.find(i => i.id === currentView)?.label || 'Dashboard';
+
+if (showAuth && !currentUser) {
   return (
-    <div className="flex h-screen bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative">
-      {/* Sidebar Navigation */}
-      <aside className="w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
-        <div>
-          {/* Logo Section */}
-          <div className="p-4 lg:p-5 flex items-center gap-3 group cursor-pointer" onClick={() => setCurrentView('chat')}>
-            <div className="w-8 h-8 bg-[#37352f] text-white rounded-[10px] flex items-center justify-center transition-transform group-hover:rotate-6">
-              <Sparkles size={16} />
-            </div>
-            <span className="hidden lg:block text-lg font-bold tracking-tight text-[#37352f]">LifeSync AI</span>
-          </div>
+    <div className="min-h-screen bg-white relative animate-in fade-in duration-300">
+      <button
+        onClick={() => setShowAuth(false)}
+        className="absolute top-8 right-8 z-[110] p-2 text-[#787774] hover:text-[#37352f] hover:bg-[#efefef] rounded-full transition-all"
+        aria-label="닫기"
+      >
+        <X size={24} />
+      </button>
+      <AuthView initialMode={authMode} onLogin={(user) => {
+        setCurrentUser(user);
+        setShowAuth(false);
+      }} />
+    </div>
+  );
+}
 
-          <nav className="px-2 space-y-0.5">
-            {navItems.map(item => (
-              <button
-                key={item.id}
-                onClick={() => setCurrentView(item.id)}
-                className={`
+
+
+return (
+  <div className="flex h-screen bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative">
+    {/* Sidebar Navigation */}
+    <aside className="w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
+      <div>
+        {/* Logo Section */}
+        <div className="p-4 lg:p-5 flex items-center gap-3 group cursor-pointer" onClick={() => setCurrentView('chat')}>
+          <div className="w-8 h-8 bg-[#37352f] text-white rounded-[10px] flex items-center justify-center transition-transform group-hover:rotate-6">
+            <Sparkles size={16} />
+          </div>
+          <span className="hidden lg:block text-lg font-bold tracking-tight text-[#37352f]">LifeSync AI</span>
+        </div>
+
+        <nav className="px-2 space-y-0.5">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id)}
+              className={`
                   w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors group
                   ${currentView === item.id
-                    ? 'bg-[#efefef] text-[#37352f] font-medium'
-                    : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'}
+                  ? 'bg-[#efefef] text-[#37352f] font-medium'
+                  : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'}
                 `}
-              >
-                <item.icon size={18} className={currentView === item.id ? 'text-[#37352f]' : 'text-[#9b9a97] group-hover:text-[#37352f]'} />
-                <span className="hidden lg:block ml-2.5 text-sm">
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </nav>
+            >
+              <item.icon size={18} className={currentView === item.id ? 'text-[#37352f]' : 'text-[#9b9a97] group-hover:text-[#37352f]'} />
+              <span className="hidden lg:block ml-2.5 text-sm">
+                {item.label}
+              </span>
+            </button>
+          ))}
+        </nav>
 
-          {
-            currentView === 'board' && (
-              <div className="hidden lg:block mt-4 pt-4 border-t border-[#e9e9e8] px-2 space-y-6">
-                {/* AI Agents (Categories) */}
-                <div className="space-y-0.5">
-                  <div className="px-3 flex items-center justify-between mb-1.5 group">
-                    <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">AI 페르소나</span>
-                    <button
-                      onClick={() => setIsAddingAiAgent(!isAddingAiAgent)}
-                      className={`p-0.5 hover:bg-[#efefef] rounded transition-all ${isAddingAiAgent ? 'bg-[#efefef]' : ''}`}
-                    >
-                      <Plus size={14} className="text-[#787774]" />
-                    </button>
-                  </div>
-
-                  {isAddingAiAgent && (
-                    <div className="px-2 mb-2">
-                      <input
-                        type="text"
-                        placeholder="새 페르소나..."
-                        value={aiAgentInput}
-                        onChange={e => setAiAgentInput(e.target.value)}
-                        className="w-full bg-white border border-[#e9e9e8] rounded-[4px] py-1.5 px-3 text-sm outline-none shadow-sm"
-                        autoFocus
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            addAiAgent(aiAgentInput);
-                            setAiAgentInput('');
-                            setIsAddingAiAgent(false);
-                          }
-                          if (e.key === 'Escape') setIsAddingAiAgent(false);
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  {aiAgents.map(agent => (
-                    <div key={agent.id} className="relative group/agent">
-                      {editingAiAgentId === agent.id ? (
-                        <div className="px-2 py-1">
-                          <input
-                            type="text"
-                            value={editingAiAgentName}
-                            onChange={e => setEditingAiAgentName(e.target.value)}
-                            className="w-full bg-white border border-[#37352f] rounded-[4px] py-1 px-2 text-sm outline-none shadow-sm"
-                            autoFocus
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                updateAiAgent(agent.id, editingAiAgentName);
-                                setEditingAiAgentId(null);
-                              }
-                              if (e.key === 'Escape') setEditingAiAgentId(null);
-                            }}
-                            onBlur={() => {
-                              updateAiAgent(agent.id, editingAiAgentName);
-                              setEditingAiAgentId(null);
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex items-center">
-                          <button
-                            onClick={() => setSelectedAiAgentId(agent.id)}
-                            className={`flex-1 flex items-center px-3 py-1.5 rounded-[4px] transition-colors group ${selectedAiAgentId === agent.id
-                              ? 'bg-[#efefef] text-[#37352f] font-medium'
-                              : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
-                              }`}
-                          >
-                            <span className="mr-2 text-sm">{agent.emoji}</span>
-                            <span className="text-sm truncate">{agent.name}</span>
-                            <span className="ml-2 text-[11px] opacity-40 font-medium">
-                              {communityPosts.filter(p => p.author === agent.id).length}
-                            </span>
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveAiAgentMenu(activeAiAgentMenu === agent.id ? null : agent.id);
-                            }}
-                            className={`p-1 hover:bg-[#e9e9e8] rounded opacity-0 group-hover/agent:opacity-100 transition-opacity mr-1 ${activeAiAgentMenu === agent.id ? 'opacity-100 bg-[#e9e9e8]' : ''}`}
-                          >
-                            <MoreVertical size={14} className="text-[#9b9a97]" />
-                          </button>
-                        </div>
-                      )}
-
-                      {activeAiAgentMenu === agent.id && (
-                        <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-[#e9e9e8] rounded-[4px] shadow-lg z-[100] py-1 animate-in fade-in zoom-in-95 duration-100">
-                          <button
-                            onClick={() => {
-                              setEditingAiAgentId(agent.id);
-                              setEditingAiAgentName(agent.name);
-                              setActiveAiAgentMenu(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#37352f] hover:bg-[#efefef] transition-colors text-left"
-                          >
-                            <Edit3 size={12} className="text-[#9b9a97]" /> 이름 변경
-                          </button>
-                          <button
-                            onClick={() => {
-                              deleteAiAgent(agent.id);
-                              setActiveAiAgentMenu(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left"
-                          >
-                            <Trash2 size={12} /> 삭제
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+        {
+          currentView === 'board' && (
+            <div className="hidden lg:block mt-4 pt-4 border-t border-[#e9e9e8] px-2 space-y-6">
+              {/* AI Agents (Categories) */}
+              <div className="space-y-0.5">
+                <div className="px-3 flex items-center justify-between mb-1.5 group">
+                  <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">AI 페르소나</span>
+                  <button
+                    onClick={() => setIsAddingAiAgent(!isAddingAiAgent)}
+                    className={`p-0.5 hover:bg-[#efefef] rounded transition-all ${isAddingAiAgent ? 'bg-[#efefef]' : ''}`}
+                  >
+                    <Plus size={14} className="text-[#787774]" />
+                  </button>
                 </div>
 
-                {/* AI Post List */}
-                <div className="space-y-0.5 overflow-hidden">
-                  <div className="px-3 mb-1.5">
-                    <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">AI 게시글</span>
+                {isAddingAiAgent && (
+                  <div className="px-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="새 페르소나..."
+                      value={aiAgentInput}
+                      onChange={e => setAiAgentInput(e.target.value)}
+                      className="w-full bg-white border border-[#e9e9e8] rounded-[4px] py-1.5 px-3 text-sm outline-none shadow-sm"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          addAiAgent(aiAgentInput);
+                          setAiAgentInput('');
+                          setIsAddingAiAgent(false);
+                        }
+                        if (e.key === 'Escape') setIsAddingAiAgent(false);
+                      }}
+                    />
                   </div>
-                  <div className="max-h-[350px] overflow-y-auto custom-scrollbar space-y-0.5">
-                    {communityPosts
-                      .filter(p => !selectedAiAgentId || p.author === selectedAiAgentId)
-                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                      .slice(0, 5)
-                      .map(post => (
+                )}
+
+                {aiAgents.map(agent => (
+                  <div key={agent.id} className="relative group/agent">
+                    {editingAiAgentId === agent.id ? (
+                      <div className="px-2 py-1">
+                        <input
+                          type="text"
+                          value={editingAiAgentName}
+                          onChange={e => setEditingAiAgentName(e.target.value)}
+                          className="w-full bg-white border border-[#37352f] rounded-[4px] py-1 px-2 text-sm outline-none shadow-sm"
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              updateAiAgent(agent.id, editingAiAgentName);
+                              setEditingAiAgentId(null);
+                            }
+                            if (e.key === 'Escape') setEditingAiAgentId(null);
+                          }}
+                          onBlur={() => {
+                            updateAiAgent(agent.id, editingAiAgentName);
+                            setEditingAiAgentId(null);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center">
                         <button
-                          key={post.id}
-                          onClick={() => setSelectedAiPostId(post.id)}
-                          className={`w-full text-left px-3 py-2 rounded-[4px] transition-colors group ${selectedAiPostId === post.id
+                          onClick={() => setSelectedAiAgentId(agent.id)}
+                          className={`flex-1 flex items-center px-3 py-1.5 rounded-[4px] transition-colors group ${selectedAiAgentId === agent.id
                             ? 'bg-[#efefef] text-[#37352f] font-medium'
                             : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
                             }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm truncate pr-2">
-                              {post.content.split('\n')[0].substring(0, 15)}...
-                            </span>
-                            <span className="text-[10px] opacity-60 font-medium flex-shrink-0">
-                              {format(parseISO(post.timestamp), 'MM.dd')}
-                            </span>
-                          </div>
+                          <span className="mr-2 text-sm">{agent.emoji}</span>
+                          <span className="text-sm truncate">{agent.name}</span>
+                          <span className="ml-2 text-[11px] opacity-40 font-medium">
+                            {communityPosts.filter(p => p.author === agent.id).length}
+                          </span>
                         </button>
-                      ))}
-                  </div>
-                </div>
-              </div>
-            )
-          }
-
-          {
-            currentView === 'journal' && (
-              <div className="mt-8 px-2 space-y-6 overflow-hidden">
-                {/* Categories Section */}
-                <div className="space-y-0.5">
-                  <div className="px-3 mb-1.5 flex items-center justify-between group">
-                    <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">카테고리</span>
-                    <button
-                      onClick={() => setIsAddingJournalCategory(true)}
-                      className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  </div>
-
-
-
-                  {journalCategories.map(cat => (
-                    <div
-                      key={cat.id}
-                      className="relative group/cat"
-                      onMouseLeave={() => setActiveCategoryMenu(null)}
-                    >
-                      <button
-                        onClick={() => setSelectedJournalCategory(cat.name)}
-                        className={`w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors text-sm ${selectedJournalCategory === cat.name ? 'bg-[#efefef] text-[#37352f] font-medium' : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'}`}
-                      >
-                        <Hash size={14} className="mr-2.5 opacity-50" />
-                        <span className="truncate flex-1 text-left">{cat.name}</span>
-
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setActiveCategoryMenu(activeCategoryMenu === cat.id ? null : cat.id);
+                            setActiveAiAgentMenu(activeAiAgentMenu === agent.id ? null : agent.id);
                           }}
-                          className="p-0.5 hover:bg-[#d9d9d8] rounded text-[#9b9a97] opacity-0 group-hover/cat:opacity-100 transition-all"
+                          className={`p-1 hover:bg-[#e9e9e8] rounded opacity-0 group-hover/agent:opacity-100 transition-opacity mr-1 ${activeAiAgentMenu === agent.id ? 'opacity-100 bg-[#e9e9e8]' : ''}`}
                         >
-                          <MoreVertical size={12} />
+                          <MoreVertical size={14} className="text-[#9b9a97]" />
                         </button>
-                      </button>
+                      </div>
+                    )}
 
-                      {/* Category Action Menu */}
-                      {activeCategoryMenu === cat.id && (
-                        <div className="absolute left-full top-0 ml-1 w-32 bg-white border border-[#e9e9e8] rounded-lg shadow-xl py-1 z-[60] animate-in fade-in zoom-in-95 duration-200">
-                          <button
-                            onClick={() => {
-                              setEditingCategoryId(cat.id);
-                              setEditingCategoryName(cat.name);
-                              setActiveCategoryMenu(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#37352f] hover:bg-[#efefef] transition-colors text-left"
-                          >
-                            <Edit3 size={12} className="text-[#9b9a97]" /> 이름 변경
-                          </button>
-                          <button
-                            onClick={() => {
-                              deleteJournalCategory(cat.id);
-                              setActiveCategoryMenu(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left"
-                          >
-                            <Trash2 size={12} /> 삭제
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {isAddingJournalCategory && (
-                    <div className="px-2 mb-2">
-                      <input
-                        type="text"
-                        placeholder="새 카테고리..."
-                        value={journalCategoryInput}
-                        onChange={e => setJournalCategoryInput(e.target.value)}
-                        className="w-full bg-white border border-[#e9e9e8] rounded-[4px] py-1.5 px-3 text-sm outline-none shadow-sm"
-                        autoFocus
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            addJournalCategory(journalCategoryInput);
-                            setJournalCategoryInput('');
-                            setIsAddingJournalCategory(false);
-                          }
-                          if (e.key === 'Escape') setIsAddingJournalCategory(false);
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Entry List */}
-                <div className="space-y-0.5 overflow-hidden">
-                  <div className="px-3 mb-1.5">
-                    <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">기록 목록</span>
-                  </div>
-                  <div className="max-h-[350px] overflow-y-auto custom-scrollbar space-y-0.5">
-                    {entries
-                      .filter(e => selectedJournalCategory === 'all' || e.category === selectedJournalCategory)
-                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                      .map(entry => (
+                    {activeAiAgentMenu === agent.id && (
+                      <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-[#e9e9e8] rounded-[4px] shadow-lg z-[100] py-1 animate-in fade-in zoom-in-95 duration-100">
                         <button
-                          key={entry.id}
-                          onClick={() => setSelectedJournalId(entry.id)}
-                          className={`w-full text-left px-3 py-2 rounded-[4px] transition-colors group ${selectedJournalId === entry.id
-                            ? 'bg-[#efefef] text-[#37352f] font-medium'
-                            : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
-                            }`}
+                          onClick={() => {
+                            setEditingAiAgentId(agent.id);
+                            setEditingAiAgentName(agent.name);
+                            setActiveAiAgentMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#37352f] hover:bg-[#efefef] transition-colors text-left"
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm truncate pr-2">
-                              {entry.title || '제목 없음'}
-                            </span>
-                            <span className="text-[10px] opacity-60 font-medium flex-shrink-0">
-                              {format(parseISO(entry.date), 'MM.dd')}
-                            </span>
-                          </div>
+                          <Edit3 size={12} className="text-[#9b9a97]" /> 이름 변경
                         </button>
-                      ))}
+                        <button
+                          onClick={() => {
+                            deleteAiAgent(agent.id);
+                            setActiveAiAgentMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left"
+                        >
+                          <Trash2 size={12} /> 삭제
+                        </button>
+                      </div>
+                    )}
                   </div>
+                ))}
+              </div>
+
+              {/* AI Post List */}
+              <div className="space-y-0.5 overflow-hidden">
+                <div className="px-3 mb-1.5">
+                  <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">AI 게시글</span>
+                </div>
+                <div className="max-h-[350px] overflow-y-auto custom-scrollbar space-y-0.5">
+                  {communityPosts
+                    .filter(p => !selectedAiAgentId || p.author === selectedAiAgentId)
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .slice(0, 5)
+                    .map(post => (
+                      <button
+                        key={post.id}
+                        onClick={() => setSelectedAiPostId(post.id)}
+                        className={`w-full text-left px-3 py-2 rounded-[4px] transition-colors group ${selectedAiPostId === post.id
+                          ? 'bg-[#efefef] text-[#37352f] font-medium'
+                          : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm truncate pr-2">
+                            {post.content.split('\n')[0].substring(0, 15)}...
+                          </span>
+                          <span className="text-[10px] opacity-60 font-medium flex-shrink-0">
+                            {format(parseISO(post.timestamp), 'MM.dd')}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
                 </div>
               </div>
-            )
-          }
-
-          {/* Divider */}
-          <div className="mx-4 my-4 border-t border-[#e9e9e8]"></div>
-
-          {/* Settings and User Info */}
-          <div className="px-2">
-            <div className="pt-4 space-y-0.5">
-              <button
-                onClick={() => setCurrentView('settings')}
-                className={`w-full flex items-center gap-3 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${currentView === 'settings' ? 'bg-[#efefef] text-[#37352f]' : 'text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
-              >
-                <Settings2 size={16} /> 설정
-              </button>
             </div>
+          )
+        }
+
+        {
+          currentView === 'journal' && (
+            <div className="mt-8 px-2 space-y-6 overflow-hidden">
+              {/* Categories Section */}
+              <div className="space-y-0.5">
+                <div className="px-3 mb-1.5 flex items-center justify-between group">
+                  <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">카테고리</span>
+                  <button
+                    onClick={() => setIsAddingJournalCategory(true)}
+                    className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+
+
+
+                {journalCategories.map(cat => (
+                  <div
+                    key={cat.id}
+                    className="relative group/cat"
+                    onMouseLeave={() => setActiveCategoryMenu(null)}
+                  >
+                    <button
+                      onClick={() => setSelectedJournalCategory(cat.name)}
+                      className={`w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors text-sm ${selectedJournalCategory === cat.name ? 'bg-[#efefef] text-[#37352f] font-medium' : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'}`}
+                    >
+                      <Hash size={14} className="mr-2.5 opacity-50" />
+                      <span className="truncate flex-1 text-left">{cat.name}</span>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveCategoryMenu(activeCategoryMenu === cat.id ? null : cat.id);
+                        }}
+                        className="p-0.5 hover:bg-[#d9d9d8] rounded text-[#9b9a97] opacity-0 group-hover/cat:opacity-100 transition-all"
+                      >
+                        <MoreVertical size={12} />
+                      </button>
+                    </button>
+
+                    {/* Category Action Menu */}
+                    {activeCategoryMenu === cat.id && (
+                      <div className="absolute left-full top-0 ml-1 w-32 bg-white border border-[#e9e9e8] rounded-lg shadow-xl py-1 z-[60] animate-in fade-in zoom-in-95 duration-200">
+                        <button
+                          onClick={() => {
+                            setEditingCategoryId(cat.id);
+                            setEditingCategoryName(cat.name);
+                            setActiveCategoryMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#37352f] hover:bg-[#efefef] transition-colors text-left"
+                        >
+                          <Edit3 size={12} className="text-[#9b9a97]" /> 이름 변경
+                        </button>
+                        <button
+                          onClick={() => {
+                            deleteJournalCategory(cat.id);
+                            setActiveCategoryMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left"
+                        >
+                          <Trash2 size={12} /> 삭제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {isAddingJournalCategory && (
+                  <div className="px-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="새 카테고리..."
+                      value={journalCategoryInput}
+                      onChange={e => setJournalCategoryInput(e.target.value)}
+                      className="w-full bg-white border border-[#e9e9e8] rounded-[4px] py-1.5 px-3 text-sm outline-none shadow-sm"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          addJournalCategory(journalCategoryInput);
+                          setJournalCategoryInput('');
+                          setIsAddingJournalCategory(false);
+                        }
+                        if (e.key === 'Escape') setIsAddingJournalCategory(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Entry List */}
+              <div className="space-y-0.5 overflow-hidden">
+                <div className="px-3 mb-1.5">
+                  <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">기록 목록</span>
+                </div>
+                <div className="max-h-[350px] overflow-y-auto custom-scrollbar space-y-0.5">
+                  {entries
+                    .filter(e => selectedJournalCategory === 'all' || e.category === selectedJournalCategory)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map(entry => (
+                      <button
+                        key={entry.id}
+                        onClick={() => setSelectedJournalId(entry.id)}
+                        className={`w-full text-left px-3 py-2 rounded-[4px] transition-colors group ${selectedJournalId === entry.id
+                          ? 'bg-[#efefef] text-[#37352f] font-medium'
+                          : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm truncate pr-2">
+                            {entry.title || '제목 없음'}
+                          </span>
+                          <span className="text-[10px] opacity-60 font-medium flex-shrink-0">
+                            {format(parseISO(entry.date), 'MM.dd')}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        {/* Divider */}
+        <div className="mx-4 my-4 border-t border-[#e9e9e8]"></div>
+
+        {/* Settings and User Info */}
+        <div className="px-2">
+          <div className="pt-4 space-y-0.5">
             <button
-              onClick={() => setCurrentView('api-settings')}
-              className={`
+              onClick={() => setCurrentView('settings')}
+              className={`w-full flex items-center gap-3 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${currentView === 'settings' ? 'bg-[#efefef] text-[#37352f]' : 'text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
+            >
+              <Settings2 size={16} /> 설정
+            </button>
+          </div>
+          <button
+            onClick={() => setCurrentView('api-settings')}
+            className={`
                 w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors group mt-0.5
                 ${currentView === 'api-settings'
-                  ? 'bg-[#efefef] text-[#37352f] font-medium'
-                  : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'}
+                ? 'bg-[#efefef] text-[#37352f] font-medium'
+                : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'}
               `}
+          >
+            <Sparkles size={18} />
+            <span className="hidden lg:block ml-2.5 text-sm">
+              API 연결 설정
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Section: Pro & Auth */}
+      <div className="p-3 space-y-3">
+        <div className="bg-white border border-[#e9e9e8] rounded-lg p-3 shadow-sm hidden lg:block">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#2ecc71] to-[#3498db] flex-shrink-0"></div>
+            <span className="text-xs font-semibold text-[#37352f]">Pro Plan</span>
+          </div>
+          <p className="text-[11px] text-[#9b9a97] leading-tight">
+            AI 커뮤니티가 활성화되었습니다.
+          </p>
+        </div>
+
+        {currentUser ? (
+          <div className="bg-white border border-[#e9e9e8] rounded-lg p-2 flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <div className="w-6 h-6 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[10px] font-bold text-[#37352f] flex-shrink-0">
+                {currentUser?.name?.[0] || 'U'}
+              </div>
+              <span className="text-xs font-bold text-[#37352f] truncate">{currentUser?.name}</span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors flex-shrink-0"
+              title="로그아웃"
             >
-              <Sparkles size={18} />
-              <span className="hidden lg:block ml-2.5 text-sm">
-                API 연결 설정
-              </span>
+              <LogOut size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="px-1">
+            <button
+              onClick={() => {
+                setAuthMode('login');
+                setShowAuth(true);
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#37352f] text-white text-[11px] font-bold rounded-lg hover:bg-black transition-all shadow-sm"
+            >
+              <UserIcon size={14} strokeWidth={3} />
+              로그인 / 가입하기
+            </button>
+          </div>
+        )}
+      </div>
+    </aside>
+
+    {/* Main Content Area */}
+    < main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white" >
+      {/* Top Mobile Bar (Visible only on small screens) */}
+      < header className="lg:hidden h-12 bg-white border-b border-[#e9e9e8] flex items-center justify-center font-semibold text-sm z-40 relative" >
+        LifeSync
+      </header >
+
+      {/* Scrollable View Content */}
+      < div className={`flex-1 relative scroll-smooth ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className={`h-full mx-auto ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'max-w-none p-0' : 'max-w-[1200px] p-4 lg:p-8 lg:pt-10'}`}>
+          {renderView()}
+        </div>
+      </div >
+
+      {undoToast && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className="bg-[#37352f] text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+            <span className="text-sm">{undoToast.label}</span>
+            <button
+              onClick={handleUndo}
+              className="text-xs font-semibold bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-md transition-colors"
+            >
+              실행 취소
             </button>
           </div>
         </div>
-
-        {/* Bottom Section: Pro & Auth */}
-        <div className="p-3 space-y-3">
-          <div className="bg-white border border-[#e9e9e8] rounded-lg p-3 shadow-sm hidden lg:block">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#2ecc71] to-[#3498db] flex-shrink-0"></div>
-              <span className="text-xs font-semibold text-[#37352f]">Pro Plan</span>
-            </div>
-            <p className="text-[11px] text-[#9b9a97] leading-tight">
-              AI 커뮤니티가 활성화되었습니다.
-            </p>
-          </div>
-
-          {currentUser ? (
-            <div className="bg-white border border-[#e9e9e8] rounded-lg p-2 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <div className="w-6 h-6 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[10px] font-bold text-[#37352f] flex-shrink-0">
-                  {currentUser?.name?.[0] || 'U'}
-                </div>
-                <span className="text-xs font-bold text-[#37352f] truncate">{currentUser?.name}</span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors flex-shrink-0"
-                title="로그아웃"
-              >
-                <LogOut size={14} />
-              </button>
-            </div>
-          ) : (
-            <div className="px-1">
-              <button
-                onClick={() => {
-                  setAuthMode('login');
-                  setShowAuth(true);
-                }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#37352f] text-white text-[11px] font-bold rounded-lg hover:bg-black transition-all shadow-sm"
-              >
-                <UserIcon size={14} strokeWidth={3} />
-                로그인 / 가입하기
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      < main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white" >
-        {/* Top Mobile Bar (Visible only on small screens) */}
-        < header className="lg:hidden h-12 bg-white border-b border-[#e9e9e8] flex items-center justify-center font-semibold text-sm z-40 relative" >
-          LifeSync
-        </header >
-
-        {/* Scrollable View Content */}
-        < div className={`flex-1 relative scroll-smooth ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <div className={`h-full mx-auto ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'max-w-none p-0' : 'max-w-[1200px] p-4 lg:p-8 lg:pt-10'}`}>
-            {renderView()}
-          </div>
-        </div >
-
-        {undoToast && (
-          <div className="fixed bottom-6 right-6 z-50">
-            <div className="bg-[#37352f] text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
-              <span className="text-sm">{undoToast.label}</span>
-              <button
-                onClick={handleUndo}
-                className="text-xs font-semibold bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-md transition-colors"
-              >
-                실행 취소
-              </button>
-            </div>
-          </div>
-        )}
-      </main >
-    </div >
-  );
+      )}
+    </main >
+  </div >
+);
 };
 
 export default App;

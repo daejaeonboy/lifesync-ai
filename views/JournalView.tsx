@@ -15,7 +15,8 @@ import {
   Layout,
   ChevronRight,
   Filter,
-  MessageSquare
+  MessageSquare,
+  Sparkles
 } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -33,7 +34,6 @@ interface JournalViewProps {
   onUpdateEntry: (id: string, updates: Partial<JournalEntry>) => void;
   onDeleteEntry: (id: string) => void;
   onAddCategory: (name: string) => void;
-  onAddCategory: (name: string) => void;
   onAddComment: (entryId: string, comment: Omit<Comment, 'id' | 'timestamp'>) => void;
   onRequestAiComment: (id: string) => void;
 }
@@ -49,8 +49,6 @@ const JournalView: React.FC<JournalViewProps> = ({
   onSearchQuery,
   onAddEntry,
   onUpdateEntry,
-  onDeleteEntry,
-  onAddCategory,
   onDeleteEntry,
   onAddCategory,
   onAddComment,

@@ -387,8 +387,6 @@ export const generateCommunityPosts = (
             previousAgentName = agentName;
         }, delay);
     });
-}, delay);
-    });
 };
 
 export const generateJournalComment = (
