@@ -5,6 +5,7 @@ import { ApiUsageStats } from '../types';
  */
 interface GeminiResponse {
     candidates: {
+        finishReason?: string;
         content: {
             parts: {
                 text: string;
@@ -43,7 +44,7 @@ export const callGeminiAPI = async (
                 ],
                 generationConfig: {
                     temperature: 0.7,
-                    maxOutputTokens: 1000,
+                    maxOutputTokens: 4096,
                 }
             }),
         });
@@ -54,7 +55,11 @@ export const callGeminiAPI = async (
         }
 
         const data: GeminiResponse = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const text = parts
+            .map(part => part?.text || '')
+            .join('')
+            .trim();
 
         if (!text) {
             throw new Error('응답 데이터를 파싱할 수 없습니다.');

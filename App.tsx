@@ -366,7 +366,30 @@ const App: React.FC = () => {
         dbJournalCategories.map((category: any) => ({ ...category, name: normalizeKoreanText(category.name) }))
       );
     }
-    if (dbJournalEntries) setEntries(dbJournalEntries);
+    if (dbJournalEntries) {
+      const categoryNameById = new Map(
+        (dbJournalCategories || []).map((category: any) => [category.id, normalizeKoreanText(category.name)])
+      );
+
+      setEntries(
+        dbJournalEntries.map((entry: any) => {
+          const mood: JournalEntry['mood'] =
+            entry.mood === 'good' || entry.mood === 'bad' || entry.mood === 'neutral'
+              ? entry.mood
+              : 'neutral';
+
+          return {
+            id: entry.id,
+            title: normalizeKoreanText(entry.title || ''),
+            content: normalizeKoreanText(entry.content || ''),
+            date: typeof entry.date === 'string' ? entry.date : new Date().toISOString(),
+            mood,
+            category: entry.category_id ? categoryNameById.get(entry.category_id) || '메모장' : '메모장',
+            order: typeof entry.order === 'number' ? entry.order : 0,
+          } as JournalEntry;
+        })
+      );
+    }
     if (dbEvents) setEvents(dbEvents);
     if (dbPosts) setCommunityPosts(dbPosts);
   };
@@ -708,9 +731,31 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleClearAllData = () => {
+  const handleClearAllData = async () => {
     const confirmed = window.confirm('모든 기록을 삭제할까요? (일정/할 일/일기/AI 보드/활동 기록)\n이 작업은 되돌릴 수 없습니다.');
     if (!confirmed) return;
+
+    if (currentUser) {
+      try {
+        const userId = currentUser.id;
+        const deleteOps = await Promise.all([
+          supabase.from('community_posts').delete().eq('user_id', userId),
+          supabase.from('calendar_events').delete().eq('user_id', userId),
+          supabase.from('journal_entries').delete().eq('user_id', userId),
+          supabase.from('todos').delete().eq('user_id', userId),
+          supabase.from('todo_lists').delete().eq('user_id', userId),
+        ]);
+
+        const failed = deleteOps.find(result => result.error);
+        if (failed?.error) {
+          throw failed.error;
+        }
+      } catch (error) {
+        console.error('Failed to clear remote records:', error);
+        alert('서버 기록 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+    }
 
     setEvents([]);
     setTodos([]);
@@ -719,6 +764,8 @@ const App: React.FC = () => {
     setPosts([]);
     setCommunityPosts([]);
     setActivityLog([]);
+    setSelectedJournalId(null);
+    setSelectedAiPostId(null);
 
     ['ls_events', 'ls_todos', 'ls_entries', 'ls_posts', 'ls_community', 'ls_activity', 'ls_userName', 'ls_todo_lists'].forEach(key => {
       localStorage.removeItem(key);

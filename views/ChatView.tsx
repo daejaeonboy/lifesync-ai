@@ -28,7 +28,7 @@ interface ChatViewProps {
     todoLists: TodoList[];
     onAddEvent: (event: CalendarEvent) => void;
     onAddTodo: (text: string, listId?: string, dueDate?: string, category?: Todo['category']) => void;
-    onAddEntry: (content: string, mood: JournalEntry['mood']) => void;
+    onAddEntry: (title: string, content: string, category?: string, mood?: JournalEntry['mood']) => void;
     onAddPost: (post: AiPost) => void;
     requireConfirm?: boolean;
     settings: AppSettings;
@@ -211,9 +211,17 @@ const ChatView: React.FC<ChatViewProps> = ({
             if (lowerText.includes('좋') || lowerText.includes('행복') || lowerText.includes('신나') || lowerText.includes('설레')) mood = 'good';
             if (lowerText.includes('피곤') || lowerText.includes('힘들') || lowerText.includes('슬프') || lowerText.includes('우울') || lowerText.includes('나쁨') || lowerText.includes('화나') || lowerText.includes('짜증')) mood = 'bad';
 
+            const normalized = text.replace(/\s+/g, ' ').trim();
+            const inferredTitle = normalized.length > 24 ? `${normalized.slice(0, 24)}…` : normalized;
+
             return {
                 type: 'add_journal',
-                data: { content: text, mood },
+                data: {
+                    title: inferredTitle || '채팅 메모',
+                    content: text,
+                    category: '메모장',
+                    mood,
+                },
             };
         }
 
@@ -251,7 +259,12 @@ const ChatView: React.FC<ChatViewProps> = ({
                 }
                 break;
             case 'add_journal':
-                onAddEntry(action.data.content, action.data.mood);
+                onAddEntry(
+                    action.data?.title || '채팅 메모',
+                    action.data?.content || '',
+                    action.data?.category || '메모장',
+                    action.data?.mood || 'neutral'
+                );
                 break;
             case 'generate_insight':
                 try {
