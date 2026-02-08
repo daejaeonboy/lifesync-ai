@@ -81,10 +81,14 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                     >
                         <div className="flex items-start gap-4 mb-4">
                             <div
-                                className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm"
+                                className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm overflow-hidden"
                                 style={{ backgroundColor: agent.color + '20', border: `2px solid ${agent.color}` }}
                             >
-                                {agent.emoji}
+                                {agent.avatar ? (
+                                    <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    agent.emoji
+                                )}
                             </div>
                             <div className="flex-1">
                                 <div className="flex items-center gap-2">
@@ -191,10 +195,14 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                         <div className="p-6 border-b border-[#e9e9e8]" style={{ backgroundColor: editingAgent.color + '10' }}>
                             <div className="flex items-center gap-4">
                                 <div
-                                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
+                                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl overflow-hidden"
                                     style={{ backgroundColor: 'white', border: `3px solid ${editingAgent.color}` }}
                                 >
-                                    {editingAgent.emoji}
+                                    {editingAgent.avatar ? (
+                                        <img src={editingAgent.avatar} alt={editingAgent.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        editingAgent.emoji
+                                    )}
                                 </div>
                                 <div>
                                     <h3 className="text-2xl font-bold" style={{ color: editingAgent.color }}>{editingAgent.name}</h3>
@@ -240,6 +248,17 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                                     className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10 resize-none"
                                     placeholder="어떤 톤으로 말할지 설명해주세요..."
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold mb-2">프로필 이미지 URL</label>
+                                <input
+                                    type="text"
+                                    value={editingAgent.avatar || ''}
+                                    onChange={(e) => setEditingAgent({ ...editingAgent, avatar: e.target.value })}
+                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
+                                    placeholder="이미지 주소를 입력하세요 (https://...)"
+                                />
+                                <p className="text-xs text-[#9b9a97] mt-1">입력하지 않으면 이모티콘이 표시됩니다.</p>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-3">테마 색상</label>

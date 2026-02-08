@@ -75,6 +75,7 @@ export interface AIAgent {
   personality: string;
   tone: string;
   color: string;
+  avatar?: string;
 }
 
 export interface CommunityPost {
