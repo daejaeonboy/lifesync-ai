@@ -493,26 +493,10 @@ const ChatView: React.FC<ChatViewProps> = ({
 
     return (
         <div className="max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans">
-            {/* Header */}
-            <div className="pt-4 pb-4 px-2 border-b border-[#f7f7f5]">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-md overflow-hidden">
-                        {agent?.avatar ? (
-                            <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
-                        ) : (
-                            <span className="text-xl">{agent?.emoji || <Sparkles size={20} />}</span>
-                        )}
-                    </div>
-                    <div>
-                        <h1 className="text-xl font-bold tracking-tight">{agent?.name || 'LifeSync AI'}</h1>
-                        <p className="text-xs text-[#9b9a97]">{userName ? `${userName}님의 ${agent?.role || '개인 비서'}` : '당신의 하루를 함께해요'}</p>
-                    </div>
-                </div>
-            </div>
 
-            {/* Chat Messages Area */}
+
             <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6">
-                {messages.map((msg) => (
+                {messages.map((msg, index) => (
                     <div key={msg.id} className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
                         {msg.role === 'assistant' && (
                             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
@@ -542,8 +526,8 @@ const ChatView: React.FC<ChatViewProps> = ({
                                 )}
                             </div>
 
-                            {/* Quick Replies */}
-                            {msg.role === 'assistant' && msg.quickReplies && msg.quickReplies.length > 0 && (
+                            {/* Quick Replies - Only for the first message */}
+                            {msg.role === 'assistant' && index === 0 && msg.quickReplies && msg.quickReplies.length > 0 && (
                                 <div className="flex flex-wrap gap-2 mt-3 ml-1">
                                     {msg.quickReplies.map((reply, idx) => (
                                         <button
