@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
 import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext } from './types';
-import { CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users } from 'lucide-react';
+import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { ko } from 'date-fns/locale';
+import { ko } from 'date-fns/locale/ko';
 import { supabase } from './utils/supabase';
 import CalendarView from './views/CalendarView';
 import TodoView from './views/TodoView';
@@ -17,8 +17,13 @@ import { generateCommunityPosts } from './utils/triggerEngine';
 
 // Mock Data Loaders (In a real app, this would be an API or more robust local storage)
 const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
-  const saved = localStorage.getItem(key);
-  return saved ? JSON.parse(saved) : defaultVal;
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : defaultVal;
+  } catch (e) {
+    console.error(`Error loading ${key} from storage`, e);
+    return defaultVal;
+  }
 };
 
 const saveToStorage = (key: string, data: any) => {
@@ -54,7 +59,10 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(() => loadFromStorage('ls_current_view', 'chat'));
 
   // App Data State
-  const [events, setEvents] = useState<CalendarEvent[]>(() => loadFromStorage('ls_events', []));
+  const [events, setEvents] = useState<CalendarEvent[]>(() => {
+    const stored = loadFromStorage('ls_events', []);
+    return Array.isArray(stored) ? stored : [];
+  });
   const [todoLists, setTodoLists] = useState<TodoList[]>(() => {
     const stored = loadFromStorage<TodoList[]>('ls_todo_lists', []);
     // Migration: Force reset to default single list if we detect multiple lists (old default was 5, user might have added more)
@@ -1002,6 +1010,8 @@ const App: React.FC = () => {
     import('./utils/triggerEngine').then(({ generateJournalComment }) => {
       generateJournalComment(
         { title: entry.title, content: entry.content, mood: entry.mood },
+        events,
+        todos,
         aiAgents,
         (comment) => addJournalComment(entryId, comment),
         settings.geminiApiKey,

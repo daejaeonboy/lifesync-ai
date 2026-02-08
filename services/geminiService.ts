@@ -80,4 +80,69 @@ export const generateLifeInsight = async (
     console.error("Gemini generation failed:", error);
     throw new Error("AI 분석 글을 생성하는 데 실패했습니다.");
   }
+
+};
+
+export const generateChatResponse = async (
+  apiKey: string,
+  messageHistory: { role: 'user' | 'assistant'; content: string }[],
+  events: CalendarEvent[],
+  todos: Todo[],
+  journalEntries: JournalEntry[],
+  userName: string
+): Promise<string> => {
+  if (!apiKey) {
+    throw new Error("API Key가 필요합니다.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const today = new Date().toISOString().split('T')[0];
+
+  const contextData = {
+    date: today,
+    userName: userName,
+    upcomingEvents: events.filter(e => e.date >= today).slice(0, 5),
+    pendingTasks: todos.filter(t => !t.completed).slice(0, 5),
+    recentJournal: journalEntries.slice(0, 3)
+  };
+
+  const systemInstruction = `
+    당신은 "Aria(아리아)"라는 이름의 AI 비서입니다.
+    사용자(${userName})의 일상을 돕고, 분석적이지만 친절하게 대화합니다.
+    
+    [사용자 컨텍스트]
+    ${JSON.stringify(contextData)}
+    
+    [지침]
+    1. 사용자의 질문이나 말에 자연스럽게 대답하세요.
+    2. 컨텍스트(일정, 할 일, 일기)를 참고하여 상황에 맞는 조언이나 공감을 해주세요.
+    3. 너무 기계적이거나 딱딱하지 않게, 친근하고 지적인 톤을 유지하세요.
+    4. 3문장 이내로 간결하게 답하는 것을 선호하세요.
+    5. 한국어로 대화하세요.
+    `;
+
+  try {
+    // Prepare contents for chat
+    // Map history to Google GenAI format: { role: 'user' | 'model', parts: [{ text: ... }] }
+    // The last message is also part of history in the input here from the caller?
+    // Let's assume messageHistory contains the full conversation including the latest user message.
+
+    const validContents = messageHistory.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }]
+    }));
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-lite-preview-02-05', // Using a fast model for chat
+      contents: validContents,
+      config: {
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+      }
+    });
+
+    return response.text || "죄송해요, 답변을 생성하지 못했어요.";
+  } catch (error) {
+    console.error("Gemini chat generation failed:", error);
+    return "죄송해요, 잠시 생각하느라 답변이 늦어졌어요. 다시 말씀해 주시겠어요? (API 오류)";
+  }
 };

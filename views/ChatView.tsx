@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent } from '../types';
-import { generateLifeInsight } from '../services/geminiService';
+import { generateLifeInsight, generateChatResponse } from '../services/geminiService';
 import { Sparkles, ChevronRight } from '../components/Icons';
 import { format, parseISO, addDays, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -470,21 +470,68 @@ const ChatView: React.FC<ChatViewProps> = ({
 
         if (action) {
             await executeAction(action);
+            const response = getResponseForAction(action, messageText);
+            const assistantMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: response.content,
+                timestamp: new Date(),
+                action: { ...action, executed: true }, // executed flag
+                quickReplies: response.quickReplies,
+            };
+            setMessages((prev) => [...prev, assistantMessage]);
+            setIsProcessing(false);
+        } else {
+            // General Chat / Fallback with API
+            if (settings.geminiApiKey) {
+                try {
+                    // Create history for API (exclude current processing message which is already in 'messages' state? No, handleSend adds it to state)
+                    // Wait, setMessages is async. 'messages' variable might not have the new user message yet.
+                    // But we constructed 'userMessage' object.
+                    // So history should be [...messages, userMessage].
+                    const history = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
+
+                    const reply = await generateChatResponse(
+                        settings.geminiApiKey,
+                        history,
+                        events,
+                        todos,
+                        entries,
+                        userName
+                    );
+
+                    const assistantMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: reply,
+                        timestamp: new Date(),
+                    };
+                    setMessages((prev) => [...prev, assistantMessage]);
+
+                } catch (error) {
+                    console.error(error);
+                    const assistantMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: "죄송해요, 대화 중 오류가 발생했어요. 다시 말씀해 주시겠어요?",
+                        timestamp: new Date(),
+                    };
+                    setMessages((prev) => [...prev, assistantMessage]);
+                }
+            } else {
+                // Fallback if no API Key
+                const response = getResponseForAction(null, messageText);
+                const assistantMessage: ChatMessage = {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    content: response.content,
+                    timestamp: new Date(),
+                    quickReplies: response.quickReplies,
+                };
+                setMessages((prev) => [...prev, assistantMessage]);
+            }
+            setIsProcessing(false);
         }
-
-        const response = getResponseForAction(action, messageText);
-
-        const assistantMessage: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: response.content,
-            timestamp: new Date(),
-            action: action ? { ...action, executed: true } : undefined,
-            quickReplies: response.quickReplies,
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
     };
 
     const handleQuickReply = (reply: string) => {
