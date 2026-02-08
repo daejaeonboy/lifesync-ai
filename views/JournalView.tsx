@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { JournalEntry, JournalCategory, Comment } from '../types';
+import { JournalEntry, JournalCategory, Comment, AIAgent } from '../types';
 import {
   Trash2,
   Plus,
@@ -23,6 +23,7 @@ import { ko } from 'date-fns/locale';
 
 interface JournalViewProps {
   entries: JournalEntry[];
+  agents: AIAgent[];
   categories: JournalCategory[];
   selectedId: string | null;
   selectedCategory: string | 'all';
@@ -40,6 +41,7 @@ interface JournalViewProps {
 
 const JournalView: React.FC<JournalViewProps> = ({
   entries = [],
+  agents = [],
   categories = [],
   selectedId,
   selectedCategory,
@@ -301,23 +303,32 @@ const JournalView: React.FC<JournalViewProps> = ({
 
                     {selectedEntry.comments && selectedEntry.comments.length > 0 ? (
                       <div className="space-y-8">
-                        {selectedEntry.comments.map(comment => (
-                          <div key={comment.id} className="flex gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-[#f7f7f5] flex items-center justify-center text-lg flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
-                              {/* Avatar lookup would be ideal here if we had access to agent list, but for now using emoji/fallback */}
-                              {comment.authorEmoji}
-                            </div>
-                            <div className="flex-1 space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-[#37352f]">{comment.authorName}</span>
-                                <span className="text-[11px] text-[#9b9a97]">{formatFullDate(comment.timestamp)}</span>
+                        {selectedEntry.comments.map(comment => {
+                          const agent = (agents || []).find(a => a.id === comment.authorId);
+                          const avatar = agent?.avatar;
+                          const emoji = agent?.emoji || comment.authorEmoji;
+
+                          return (
+                            <div key={comment.id} className="flex gap-4">
+                              <div className="w-10 h-10 rounded-xl bg-[#f7f7f5] flex items-center justify-center text-lg flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
+                                {avatar ? (
+                                  <img src={avatar} alt={comment.authorName} className="w-full h-full object-cover" />
+                                ) : (
+                                  emoji
+                                )}
                               </div>
-                              <p className="text-[15px] leading-relaxed text-[#37352f] bg-[#fbfbfa] p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-[#f1f1f0]">
-                                {comment.content}
-                              </p>
+                              <div className="flex-1 space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-bold text-[#37352f]">{agent?.name || comment.authorName}</span>
+                                  <span className="text-[11px] text-[#9b9a97]">{formatFullDate(comment.timestamp)}</span>
+                                </div>
+                                <p className="text-[15px] leading-relaxed text-[#37352f] bg-[#fbfbfa] p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-[#f1f1f0]">
+                                  {comment.content}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="text-center py-10 bg-[#fbfbfa] rounded-xl border border-dashed border-[#e9e9e8]">

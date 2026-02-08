@@ -1079,6 +1079,7 @@ const App: React.FC = () => {
             onAddCategory={addJournalCategory}
             onAddComment={addJournalComment}
             onRequestAiComment={handleRequestAiComment}
+            agents={aiAgents}
           />
         );
       case 'chat':
