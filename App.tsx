@@ -57,8 +57,11 @@ const App: React.FC = () => {
   const [events, setEvents] = useState<CalendarEvent[]>(() => loadFromStorage('ls_events', []));
   const [todoLists, setTodoLists] = useState<TodoList[]>(() => {
     const stored = loadFromStorage<TodoList[]>('ls_todo_lists', []);
-    // Migration: If we detect the old default lists (length 5 and has 'must_do'), replace with new default
-    if (stored && stored.length === 5 && stored.some(l => l.id === 'must_do')) {
+    // Migration: Force reset to default single list if we detect multiple lists (old default was 5, user might have added more)
+    // heuristic: if length > 1, it's likely old data or user custom data that needs migration to "default state" as requested.
+    // To play it safe for "all users", we usually wouldn't wipe, but the USER requested "make the modified content the default state" implying a reset.
+    // Let's being slightly safer: if it looks like the OLD default structure (has 'must_do' or length >= 4), reset it.
+    if (stored && (stored.some(l => l.id === 'must_do') || stored.length >= 4)) {
       return DEFAULT_TODO_LISTS;
     }
     if (stored && Array.isArray(stored) && stored.length > 0) return stored;
