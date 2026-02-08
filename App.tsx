@@ -1053,6 +1053,7 @@ const App: React.FC = () => {
             onDeleteEntry={deleteEntry}
             onAddCategory={addJournalCategory}
             onAddComment={addJournalComment}
+            onRequestAiComment={handleRequestAiComment}
           />
         );
       case 'chat':

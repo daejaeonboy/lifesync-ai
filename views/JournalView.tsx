@@ -33,7 +33,9 @@ interface JournalViewProps {
   onUpdateEntry: (id: string, updates: Partial<JournalEntry>) => void;
   onDeleteEntry: (id: string) => void;
   onAddCategory: (name: string) => void;
+  onAddCategory: (name: string) => void;
   onAddComment: (entryId: string, comment: Omit<Comment, 'id' | 'timestamp'>) => void;
+  onRequestAiComment: (id: string) => void;
 }
 
 const JournalView: React.FC<JournalViewProps> = ({
@@ -49,7 +51,10 @@ const JournalView: React.FC<JournalViewProps> = ({
   onUpdateEntry,
   onDeleteEntry,
   onAddCategory,
-  onAddComment
+  onDeleteEntry,
+  onAddCategory,
+  onAddComment,
+  onRequestAiComment
 }) => {
   const [isWriting, setIsWriting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -284,31 +289,54 @@ const JournalView: React.FC<JournalViewProps> = ({
                   </div>
 
                   {/* AI Comment Section */}
-                  {selectedEntry.comments && selectedEntry.comments.length > 0 && (
-                    <div className="pt-16 border-t border-[#f1f1f0] space-y-10">
+                  <div className="pt-16 border-t border-[#f1f1f0] space-y-10">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <MessageSquare size={20} className="text-[#37352f]" />
-                        <h3 className="text-lg font-medium tracking-tight">AI의 반응</h3>
+                        <h3 className="text-lg font-medium tracking-tight">AI의 반응 ({selectedEntry.comments?.length || 0})</h3>
                       </div>
+                      <button
+                        onClick={() => onRequestAiComment(selectedEntry.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#37352f] bg-[#f7f7f5] hover:bg-[#efefef] rounded-lg transition-colors"
+                      >
+                        <Sparkles size={12} />
+                        AI 코멘트 요청
+                      </button>
+                    </div>
 
+                    {selectedEntry.comments && selectedEntry.comments.length > 0 ? (
                       <div className="space-y-8">
                         {selectedEntry.comments.map(comment => (
                           <div key={comment.id} className="flex gap-4">
-                            <div className="w-8 h-8 rounded-full bg-[#f7f7f5] flex items-center justify-center text-sm flex-shrink-0 mt-1">
+                            <div className="w-10 h-10 rounded-xl bg-[#f7f7f5] flex items-center justify-center text-lg flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
+                              {/* Avatar lookup would be ideal here if we had access to agent list, but for now using emoji/fallback */}
                               {comment.authorEmoji}
                             </div>
                             <div className="flex-1 space-y-1.5">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-[#37352f]">{comment.authorName}</span>
+                                <span className="text-sm font-bold text-[#37352f]">{comment.authorName}</span>
                                 <span className="text-[11px] text-[#9b9a97]">{formatFullDate(comment.timestamp)}</span>
                               </div>
-                              <p className="text-[15px] leading-relaxed text-[#37352f]">{comment.content}</p>
+                              <p className="text-[15px] leading-relaxed text-[#37352f] bg-[#fbfbfa] p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-[#f1f1f0]">
+                                {comment.content}
+                              </p>
                             </div>
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="text-center py-10 bg-[#fbfbfa] rounded-xl border border-dashed border-[#e9e9e8]">
+                        <p className="text-sm text-[#9b9a97] mb-3">아직 작성된 코멘트가 없습니다.</p>
+                        <button
+                          onClick={() => onRequestAiComment(selectedEntry.id)}
+                          className="px-4 py-2 bg-white border border-[#e9e9e8] text-[#37352f] text-sm font-medium rounded-lg hover:shadow-sm transition-all shadow-sm inline-flex items-center gap-2"
+                        >
+                          <Sparkles size={14} className="text-[#f59e0b]" />
+                          AI에게 피드백 받기
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

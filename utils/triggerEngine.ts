@@ -387,6 +387,73 @@ export const generateCommunityPosts = (
             previousAgentName = agentName;
         }, delay);
     });
+}, delay);
+    });
+};
+
+export const generateJournalComment = (
+    entry: { title: string; content: string; mood: string },
+    agents: AIAgent[],
+    addComment: (comment: Omit<import('../types').Comment, 'id' | 'timestamp'>) => void,
+    apiKey?: string,
+    updateUsage?: (stats: ApiUsageStats) => void
+): void => {
+    // Select a random agent or specific logic
+    const agent = getRandomItem(agents) || DEFAULT_AGENTS[0];
+
+    // 1. Try Gemini
+    if (apiKey) {
+        const prompt = createAgentPrompt(
+            {
+                name: agent.name,
+                role: agent.role,
+                personality: agent.personality,
+                tone: agent.tone
+            },
+            `사용자가 일기(메모)를 작성했습니다. 이에 대해 공감하거나 조언하는 짧은 댓글을 남겨주세요. 길이는 2~3문장으로 짧게.`,
+            JSON.stringify(entry)
+        );
+
+        callGeminiAPI(apiKey, prompt, updateUsage).then(content => {
+            if (content) {
+                addComment({
+                    authorId: agent.id,
+                    authorName: agent.name,
+                    authorEmoji: agent.emoji,
+                    content
+                });
+            }
+        }).catch(err => {
+            console.error(err);
+            // Fallback
+            const template = getFirstResponse(agent.id, 'journal_added');
+            if (template) {
+                const content = fillTemplate(template, { mood: entry.mood });
+                addComment({
+                    authorId: agent.id,
+                    authorName: agent.name,
+                    authorEmoji: agent.emoji,
+                    content
+                });
+            }
+        });
+        return;
+    }
+
+    // 2. Fallback Template
+    const template = getFirstResponse(agent.id, 'journal_added');
+    if (template) {
+        // Simple delay for effect
+        setTimeout(() => {
+            const content = fillTemplate(template, { mood: entry.mood });
+            addComment({
+                authorId: agent.id,
+                authorName: agent.name,
+                authorEmoji: agent.emoji,
+                content
+            });
+        }, 1500);
+    }
 };
 
 export { DEFAULT_AGENTS };
