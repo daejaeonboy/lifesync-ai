@@ -250,15 +250,33 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">프로필 이미지 URL</label>
-                                <input
-                                    type="text"
-                                    value={editingAgent.avatar || ''}
-                                    onChange={(e) => setEditingAgent({ ...editingAgent, avatar: e.target.value })}
-                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
-                                    placeholder="이미지 주소를 입력하세요 (https://...)"
-                                />
-                                <p className="text-xs text-[#9b9a97] mt-1">입력하지 않으면 이모티콘이 표시됩니다.</p>
+                                <label className="block text-sm font-semibold mb-2">프로필 이미지</label>
+                                <div className="flex items-center gap-3">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) {
+                                                const reader = new FileReader();
+                                                reader.onloadend = () => {
+                                                    setEditingAgent({ ...editingAgent, avatar: reader.result as string });
+                                                };
+                                                reader.readAsDataURL(file);
+                                            }
+                                        }}
+                                        className="w-full text-sm text-[#787774] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#f7f7f5] file:text-[#37352f] hover:file:bg-[#efefef]"
+                                    />
+                                    {editingAgent.avatar && (
+                                        <button
+                                            onClick={() => setEditingAgent({ ...editingAgent, avatar: undefined })}
+                                            className="text-xs text-[#eb5757] hover:underline whitespace-nowrap"
+                                        >
+                                            삭제
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-xs text-[#9b9a97] mt-1">컴퓨터에 있는 이미지를 선택하세요.</p>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-3">테마 색상</label>

@@ -293,13 +293,10 @@ const JournalView: React.FC<JournalViewProps> = ({
                         <MessageSquare size={20} className="text-[#37352f]" />
                         <h3 className="text-lg font-medium tracking-tight">AI의 반응 ({selectedEntry.comments?.length || 0})</h3>
                       </div>
-                      <button
-                        onClick={() => onRequestAiComment(selectedEntry.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#37352f] bg-[#f7f7f5] hover:bg-[#efefef] rounded-lg transition-colors"
-                      >
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#9b9a97] bg-[#f7f7f5] rounded-lg">
                         <Sparkles size={12} />
-                        AI 코멘트 요청
-                      </button>
+                        AI가 글을 읽고 있습니다...
+                      </div>
                     </div>
 
                     {selectedEntry.comments && selectedEntry.comments.length > 0 ? (
@@ -324,14 +321,11 @@ const JournalView: React.FC<JournalViewProps> = ({
                       </div>
                     ) : (
                       <div className="text-center py-10 bg-[#fbfbfa] rounded-xl border border-dashed border-[#e9e9e8]">
-                        <p className="text-sm text-[#9b9a97] mb-3">아직 작성된 코멘트가 없습니다.</p>
-                        <button
-                          onClick={() => onRequestAiComment(selectedEntry.id)}
-                          className="px-4 py-2 bg-white border border-[#e9e9e8] text-[#37352f] text-sm font-medium rounded-lg hover:shadow-sm transition-all shadow-sm inline-flex items-center gap-2"
-                        >
-                          <Sparkles size={14} className="text-[#f59e0b]" />
-                          AI에게 피드백 받기
-                        </button>
+                        <p className="text-sm text-[#9b9a97] mb-3">AI가 곧 반응을 남길 거예요.</p>
+                        <div className="inline-flex items-center gap-2 px-4 py-2 text-[#9b9a97] text-sm font-medium">
+                          <Sparkles size={14} className="text-[#f59e0b] animate-pulse" />
+                          분석 중...
+                        </div>
                       </div>
                     )}
                   </div>

@@ -934,6 +934,9 @@ const App: React.FC = () => {
         mood: mood === 'good' ? '좋음' : mood === 'bad' ? '나쁨' : '보통',
       },
     });
+
+    // Auto-request AI comment
+    handleRequestAiComment(newEntry.id);
   };
 
   const deleteEntry = async (id: string) => {
