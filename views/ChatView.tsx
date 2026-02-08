@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList } from '../types';
+import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings } from '../types';
+import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, ChevronRight } from '../components/Icons';
 import { format, parseISO, addDays, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -29,6 +30,8 @@ interface ChatViewProps {
     onAddEntry: (content: string, mood: JournalEntry['mood']) => void;
     onAddPost: (post: AiPost) => void;
     requireConfirm?: boolean;
+    settings: AppSettings;
+    onUpdateSettings?: (settings: AppSettings) => void;
 }
 
 // Helper: Get time-based greeting
@@ -69,6 +72,8 @@ const ChatView: React.FC<ChatViewProps> = ({
     onAddEntry,
     onAddPost,
     requireConfirm = true,
+    settings,
+    onUpdateSettings,
 }) => {
     // Check if this is first visit (onboarding flow)
     const [userName, setUserName] = useState<string>(() => localStorage.getItem('ls_userName') || '');
@@ -208,7 +213,7 @@ const ChatView: React.FC<ChatViewProps> = ({
         return null;
     };
 
-    const executeAction = (action: ChatMessage['action']) => {
+    const executeAction = async (action: ChatMessage['action']) => {
         if (!action) return;
 
         switch (action.type) {
@@ -235,22 +240,39 @@ const ChatView: React.FC<ChatViewProps> = ({
                 onAddEntry(action.data.content, action.data.mood);
                 break;
             case 'generate_insight':
-                const completedTodos = todos.filter(t => t.completed).length;
-                const pendingTodos = todos.filter(t => !t.completed).length;
-                const recentMoods = entries.slice(0, 5).map(e => e.mood);
-                const moodSummary = recentMoods.length > 0
-                    ? `최근 감정 기록을 보면, ${recentMoods.filter(m => m === 'good').length > recentMoods.filter(m => m === 'bad').length ? '전반적으로 좋은 하루를 보내고 계시네요! 😊' : '조금 힘든 시간이 있었던 것 같아요. 충분한 휴식을 추천드려요. 🌿'}`
-                    : '아직 감정 기록이 없어요. 하루를 기록해보시면 제가 더 잘 도와드릴 수 있어요!';
+                try {
+                    if (!settings.geminiApiKey) {
+                        throw new Error('API Key가 필요해요.');
+                    }
+                    const newPost = await generateLifeInsight(settings.geminiApiKey, events, todos, entries);
+                    onAddPost(newPost);
 
-                const newPost: AiPost = {
-                    id: crypto.randomUUID(),
-                    title: `${userName || '사용자'}님의 라이프 분석`,
-                    content: `📊 **생산성 리포트**\n\n✅ 완료한 할 일: ${completedTodos}개\n⏳ 남은 할 일: ${pendingTodos}개\n📅 예정된 일정: ${events.length}개\n\n${moodSummary}\n\n💡 **오늘의 제안**: ${pendingTodos > 3 ? '할 일이 조금 쌓여있네요. 가장 중요한 것 하나만 먼저 끝내보시면 어떨까요?' : '잘 관리하고 계시네요! 자신에게 작은 보상을 주세요 ☕'}`,
-                    date: new Date().toISOString(),
-                    tags: ['분석', '생산성', '감정'],
-                    type: 'analysis',
-                };
-                onAddPost(newPost);
+                    // Update Usage Stats (Approximate token count based on input/output length)
+                    if (onUpdateSettings) {
+                        const estimatedTokens = (JSON.stringify({ events, todos, entries }).length / 4) + (newPost.content.length / 4);
+                        onUpdateSettings({
+                            ...settings,
+                            apiUsage: {
+                                totalRequests: (settings.apiUsage?.totalRequests || 0) + 1,
+                                totalTokens: (settings.apiUsage?.totalTokens || 0) + Math.ceil(estimatedTokens),
+                                lastRequestDate: new Date().toISOString(),
+                            }
+                        });
+                    }
+                } catch (error) {
+                    // console.error(error); // Error handling is done in getResponseForAction via executed flag or message content
+                    // But here we need to inform the user if it failed.
+                    // For now, let the error propagate to the response handler or handle it here by adding a system message
+                    const errorMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: settings.geminiApiKey ? 'AI 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 😢' : 'AI 분석을 하려면 먼저 **설정**에서 **Google Gemini API Key**를 등록해주세요! 🔑\n\n(무료로 발급받을 수 있어요)',
+                        timestamp: new Date(),
+                        quickReplies: ['설정하러 갈래', '괜찮아']
+                    };
+                    setMessages(prev => [...prev, errorMessage]);
+                    return; // Stop further processing
+                }
                 break;
         }
     };
@@ -406,7 +428,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 return;
             }
 
-            executeAction(pendingAction);
+            await executeAction(pendingAction);
             const confirmedResponse = getResponseForAction(pendingAction, messageText);
             const assistantMessage: ChatMessage = {
                 id: crypto.randomUUID(),
@@ -445,7 +467,7 @@ const ChatView: React.FC<ChatViewProps> = ({
         }
 
         if (action) {
-            executeAction(action);
+            await executeAction(action);
         }
 
         const response = getResponseForAction(action, messageText);

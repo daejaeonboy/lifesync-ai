@@ -1,4 +1,5 @@
-import { CommunityPost, AIAgent } from '../types';
+import { CommunityPost, AIAgent, ApiUsageStats, TriggerContext } from '../types';
+import { callGeminiAPI, createAgentPrompt } from './gemini';
 
 // =============================================================================
 // AI PERSONAS: 3명으로 축소하고 성격을 더 뚜렷하게 설정
@@ -281,26 +282,13 @@ const getChainResponse = (agentId: string, chainType: string): string | undefine
 // TRIGGER CONTEXT & MAIN EXPORT
 // =============================================================================
 
-export interface TriggerContext {
-    trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'chat_message';
-    data: {
-        text?: string;
-        title?: string;
-        date?: string;
-        mood?: string;
-        completed?: number;
-        pending?: number;
-        total?: number;
-        completionRate?: number;
-        nextTodo?: string;
-        weekCount?: number;
-    };
-}
 
 export const generateCommunityPosts = (
     context: TriggerContext,
     agents: AIAgent[],
-    addPost: (post: CommunityPost) => void
+    addPost: (post: CommunityPost) => void,
+    apiKey?: string,
+    updateUsage?: (stats: ApiUsageStats) => void
 ): void => {
     const { trigger, data } = context;
 
@@ -327,27 +315,56 @@ export const generateCommunityPosts = (
 
     // Generate posts with longer delays (3초 간격)
     agentIds.forEach((agentId, index) => {
-        const delay = index * 3000; // 3초 간격으로 여유있게
+        const delay = index * 3500; // 3.5초 간격으로 더욱 여유있게
 
-        setTimeout(() => {
+        setTimeout(async () => {
             let content: string = '';
             const agentName = getAgentName(agentId, agents);
+            const agent = agents.find(a => a.id === agentId) || DEFAULT_AGENTS.find(a => a.id === agentId);
 
-            if (index === 0) {
-                // First agent
-                const template = getFirstResponse(agentId, trigger);
-                if (template) {
-                    content = fillTemplate(template, data);
+            // 1. Try real Gemini API if apiKey is provided
+            if (apiKey && agent) {
+                try {
+                    const personaContext = index === 0
+                        ? `사용자가 ${trigger} 행동을 수행했습니다.`
+                        : `${previousAgentName}이 먼저 반응을 남겼습니다. 이에 대한 답글을 남겨주세요.`;
+
+                    const userActionStr = JSON.stringify(data);
+                    const prompt = createAgentPrompt(
+                        {
+                            name: agent.name,
+                            role: agent.role,
+                            personality: agent.personality,
+                            tone: agent.tone
+                        },
+                        personaContext,
+                        userActionStr
+                    );
+
+                    content = await callGeminiAPI(apiKey, prompt, updateUsage);
+                } catch (error) {
+                    console.warn(`Gemini API failed for ${agentId}, falling back to template:`, error);
                 }
-            } else {
-                // Chain response
-                const chainType = chainTypes[index];
-                const template = getChainResponse(agentId, chainType);
-                if (template) {
-                    content = fillTemplate(template, {
-                        ...data,
-                        prevName: previousAgentName,
-                    });
+            }
+
+            // 2. Fallback to template if Gemini failed or no apiKey
+            if (!content) {
+                if (index === 0) {
+                    // First agent
+                    const template = getFirstResponse(agentId, trigger);
+                    if (template) {
+                        content = fillTemplate(template, data);
+                    }
+                } else {
+                    // Chain response
+                    const chainType = chainTypes[index];
+                    const template = getChainResponse(agentId, chainType);
+                    if (template) {
+                        content = fillTemplate(template, {
+                            ...data,
+                            prevName: previousAgentName,
+                        });
+                    }
                 }
             }
 

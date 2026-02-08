@@ -12,24 +12,6 @@ const DEFAULT_AGENTS: AIAgent[] = [
         tone: '침착하고 분석적인 톤. 구체적인 수치와 비교를 자주 언급합니다.',
         color: '#37352f',
     },
-    {
-        id: 'MOMO',
-        name: '모모',
-        emoji: '💛',
-        role: '응원단장',
-        personality: '따뜻한 마음으로 작은 성취도 진심으로 축하합니다. 힘든 순간에는 공감하고 위로하며, 항상 긍정적인 에너지를 전달합니다.',
-        tone: '밝고 따뜻한 톤. 감정을 담아 진심으로 말합니다.',
-        color: '#37352f',
-    },
-    {
-        id: 'SAGE',
-        name: '세이지',
-        emoji: '🎯',
-        role: '전략가',
-        personality: '실용적인 조언과 구체적인 다음 단계를 제시합니다. 목표 달성을 위한 전략적 사고를 돕고, 행동으로 연결되는 코칭을 제공합니다.',
-        tone: '친근하지만 명확한 톤. 항상 다음 액션을 제안합니다.',
-        color: '#37352f',
-    },
 ];
 
 interface PersonaSettingsViewProps {
@@ -137,8 +119,10 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                 </p>
             </div>
 
+
+
             {/* App Settings */}
-            <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white border border-[#e9e9e8] rounded-xl p-6">
                     <h3 className="font-bold mb-4">⚙️ 자동 반응 설정</h3>
                     <div className="flex items-center justify-between mb-4">

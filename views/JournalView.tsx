@@ -1,146 +1,340 @@
-import React, { useState } from 'react';
-import { JournalEntry } from '../types';
-import { BookOpen, Smile, Frown, Meh, Trash2 } from '../components/Icons';
-import { format, parseISO } from 'date-fns';
+import React, { useState, useEffect, useRef } from 'react';
+import { JournalEntry, JournalCategory, Comment } from '../types';
+import {
+  Trash2,
+  Plus,
+  ChevronDown,
+  BookOpen,
+  Edit3,
+  Settings,
+  MoreHorizontal,
+  MoreVertical,
+  FolderPlus,
+  Search,
+  Hash,
+  Layout,
+  ChevronRight,
+  Filter,
+  MessageSquare
+} from 'lucide-react';
+import { format, parseISO, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
 interface JournalViewProps {
   entries: JournalEntry[];
-  onAddEntry: (content: string, mood: JournalEntry['mood']) => void;
+  categories: JournalCategory[];
+  selectedId: string | null;
+  selectedCategory: string | 'all';
+  searchQuery: string;
+  onSelectId: (id: string | null) => void;
+  onSelectCategory: (category: string | 'all') => void;
+  onSearchQuery: (query: string) => void;
+  onAddEntry: (title: string, content: string, category: string) => void;
+  onUpdateEntry: (id: string, updates: Partial<JournalEntry>) => void;
   onDeleteEntry: (id: string) => void;
+  onAddCategory: (name: string) => void;
+  onAddComment: (entryId: string, comment: Omit<Comment, 'id' | 'timestamp'>) => void;
 }
 
-const JournalView: React.FC<JournalViewProps> = ({ entries, onAddEntry, onDeleteEntry }) => {
-  const [content, setContent] = useState('');
-  const [mood, setMood] = useState<JournalEntry['mood']>('good');
+const JournalView: React.FC<JournalViewProps> = ({
+  entries = [],
+  categories = [],
+  selectedId,
+  selectedCategory,
+  searchQuery,
+  onSelectId,
+  onSelectCategory,
+  onSearchQuery,
+  onAddEntry,
+  onUpdateEntry,
+  onDeleteEntry,
+  onAddCategory,
+  onAddComment
+}) => {
+  const [isWriting, setIsWriting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showActions, setShowActions] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (content.trim()) {
-      onAddEntry(content, mood);
-      setContent('');
-      setMood('good');
+  // Write Form State
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [newCategory, setNewCategory] = useState(categories[0]?.name || '메모장');
+
+  // Sync selectedId with filtered entries
+  useEffect(() => {
+    if (isWriting) return;
+    const filtered = entries.filter(e => selectedCategory === 'all' || e.category === selectedCategory);
+    const isCurrentValid = filtered.some(e => e.id === selectedId);
+
+    if (filtered.length > 0) {
+      if (!selectedId || !isCurrentValid) {
+        const sorted = [...filtered].sort((a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        onSelectId(sorted[0].id);
+      }
+    } else {
+      if (selectedId !== null) {
+        onSelectId(null);
+      }
+    }
+  }, [entries, selectedId, selectedCategory, isWriting, onSelectId]);
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) {
+        setShowActions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [newContent, isWriting]);
+
+  const handleCreate = () => {
+    if (!newTitle.trim() || !newContent.trim()) return;
+
+    if (editingId) {
+      onUpdateEntry(editingId, {
+        title: newTitle,
+        content: newContent,
+        category: newCategory
+      });
+      setEditingId(null);
+    } else {
+      onAddEntry(newTitle, newContent, newCategory);
+    }
+
+    setNewTitle('');
+    setNewContent('');
+    setIsWriting(false);
+  };
+
+  const handleEdit = () => {
+    const entry = entries.find(e => e.id === selectedId);
+    if (!entry) return;
+    setNewTitle(entry.title || '');
+    setNewContent(entry.content || '');
+    setNewCategory(entry.category || categories[0]?.name || '메모장');
+    setEditingId(entry.id);
+    setIsWriting(true);
+    setShowActions(false);
+  };
+
+  const handleDelete = () => {
+    if (!selectedId) return;
+    if (window.confirm('정말로 이 메모를 삭제하시겠습니까?')) {
+      onDeleteEntry(selectedId);
+      onSelectId(null);
+      setShowActions(false);
     }
   };
 
-  const getMoodIcon = (m: JournalEntry['mood'], size = 20) => {
-    switch (m) {
-      case 'good': return <Smile size={size} />;
-      case 'neutral': return <Meh size={size} />;
-      case 'bad': return <Frown size={size} />;
+  const formatFullDate = (dateStr: string) => {
+    try {
+      const date = parseISO(dateStr);
+      if (!isValid(date)) return '날짜 정보가 없습니다';
+      return format(date, 'yyyy년 M월 d일 HH:mm', { locale: ko });
+    } catch (e) {
+      return '날짜 정보가 없습니다';
     }
   };
 
-  const getMoodColor = (m: JournalEntry['mood']) => {
-    switch (m) {
-      case 'good': return 'bg-orange-50 text-orange-600 border-orange-200';
-      case 'neutral': return 'bg-gray-50 text-gray-600 border-gray-200';
-      case 'bad': return 'bg-slate-50 text-slate-600 border-slate-200';
-    }
-  };
+  const selectedEntry = (entries || []).find(e => e.id === selectedId);
 
   return (
-    <div className="max-w-[800px] mx-auto text-[#37352f] px-2 font-sans">
-      {/* Header */}
-      <div className="mb-10 pt-4">
-        <h1 className="text-4xl font-bold mb-3 tracking-tight">일기장</h1>
-        <p className="text-[#9b9a97] text-lg font-medium">하루의 생각과 감정을 기록해보세요.</p>
+    <div className="flex flex-col h-full bg-white relative">
+      <div className="h-14 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-10 flex-shrink-0">
+        <div className="flex items-center gap-2 overflow-hidden text-sm font-medium text-[#9b9a97]">
+          {isWriting ? (
+            <span className="text-[#37352f] font-medium">{editingId ? '수정' : '작성'}</span>
+          ) : selectedEntry ? (
+            <>
+              <span className="truncate max-w-[120px] font-medium">{selectedEntry.category || '메모장'}</span>
+              <ChevronRight size={14} className="opacity-40" />
+              <span className="truncate max-w-[200px] text-[#37352f] font-medium">{selectedEntry.title || '제목 없음'}</span>
+            </>
+          ) : (
+            <span className="text-[#37352f] font-medium">보기</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setNewTitle('');
+              setNewContent('');
+              setIsWriting(true);
+            }}
+            className="flex items-center gap-1.5 text-xs font-medium text-white bg-[#37352f] hover:bg-black px-4 py-2 rounded-full transition-all"
+          >
+            <Plus size={14} /> 메모하기
+          </button>
+        </div>
       </div>
 
-      {/* Write Area */}
-      <div className="bg-white rounded-xl border border-[#e9e9e8] shadow-sm mb-12 overflow-hidden transition-shadow focus-within:shadow-md focus-within:border-[#d3d1cb]">
-        <form onSubmit={handleSubmit}>
-          <textarea
-            className="w-full p-6 text-lg placeholder-[#d3d1cb] resize-none focus:outline-none min-h-[160px] leading-relaxed text-[#37352f]"
-            placeholder="오늘 하루는 어떠셨나요?"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-          />
-          <div className="px-6 py-4 bg-[#fbfbfa] border-t border-[#e9e9e8] flex justify-between items-center">
-            <div className="flex gap-2">
-              {(['good', 'neutral', 'bad'] as const).map((m) => (
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-[800px] mx-auto py-20 px-10 w-full animate-in fade-in duration-500">
+          {isWriting ? (
+            <div className="space-y-10">
+              <div className="space-y-8">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-medium uppercase text-[#787774] tracking-wider px-1">카테고리</span>
+                  <select
+                    value={newCategory}
+                    onChange={e => setNewCategory(e.target.value)}
+                    className="bg-[#f7f7f5] border-none focus:ring-1 focus:ring-[#37352f] px-3 py-1 rounded text-xs font-medium text-[#37352f] transition-all outline-none appearance-none cursor-pointer"
+                  >
+                    {(categories || []).map(cat => (
+                      <option key={cat.id} value={cat.name}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  placeholder="제목을 입력하세요"
+                  value={newTitle}
+                  onChange={e => setNewTitle(e.target.value)}
+                  className="w-full text-[44px] font-medium border-none focus:ring-0 outline-none p-0 placeholder-[#e1e1e0] tracking-tight leading-tight"
+                  autoFocus
+                />
+              </div>
+              <textarea
+                ref={textareaRef}
+                placeholder="어떤 남기고 싶은 메모가 있나요? 자유롭게 기록해 보세요..."
+                value={newContent}
+                onChange={e => setNewContent(e.target.value)}
+                className="w-full text-[17px] leading-[1.8] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden"
+              />
+              <div className="flex justify-end gap-3 pt-8 border-t border-[#f1f1f0]">
                 <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMood(m)}
-                  className={`
-                    p-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all border
-                    ${mood === m
-                      ? 'bg-white shadow-sm border-[#d3d1cb] text-[#37352f] ring-1 ring-[#e9e9e8]'
-                      : 'text-[#9b9a97] border-transparent hover:bg-[#efefef] hover:text-[#37352f]'}
-                  `}
+                  onClick={() => {
+                    setIsWriting(false);
+                    setEditingId(null);
+                  }}
+                  className="px-5 py-2 text-sm font-medium text-[#787774] hover:bg-[#f5f5f5] rounded-lg transition-colors"
                 >
-                  {getMoodIcon(m, 18)}
-                  <span>{m === 'good' ? '좋음' : m === 'neutral' ? '보통' : '나쁨'}</span>
+                  취소
                 </button>
-              ))}
-            </div>
-            <button
-              type="submit"
-              disabled={!content.trim()}
-              className="px-5 py-2 bg-[#37352f] text-white rounded-lg hover:bg-[#2f2d28] disabled:opacity-30 disabled:hover:bg-[#37352f] transition-all font-medium text-sm shadow-sm"
-            >
-              기록하기
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Timeline */}
-      <div className="relative pl-8 border-l border-[#e9e9e8] space-y-12">
-        {entries.length === 0 ? (
-          <div className="py-10 text-center text-[#d3d1cb] -ml-8">
-            <div className="inline-block p-4 rounded-full bg-[#fbfbfa] mb-3">
-              <BookOpen size={32} strokeWidth={1.5} />
-            </div>
-            <p>작성된 일기가 없습니다.</p>
-          </div>
-        ) : (
-          entries.map((entry) => (
-            <div key={entry.id} className="relative group">
-              {/* Timeline Dot */}
-              <div className="absolute -left-[41px] top-6 w-5 h-5 bg-white border-2 border-[#e9e9e8] rounded-full flex items-center justify-center z-10">
-                <div className={`w-2 h-2 rounded-full ${entry.mood === 'good' ? 'bg-orange-400' : entry.mood === 'neutral' ? 'bg-gray-400' : 'bg-slate-400'
-                  }`} />
+                <button
+                  onClick={handleCreate}
+                  disabled={!newTitle.trim() || !newContent.trim()}
+                  className="px-8 py-2 bg-[#37352f] text-white text-sm font-medium rounded-lg hover:bg-black transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-lg"
+                >
+                  {editingId ? '수정 내용 저장' : '메모 저장하기'}
+                </button>
               </div>
+            </div>
+          ) : selectedEntry ? (
+            <div className="space-y-12">
+              <div className="space-y-8">
+                <div className="space-y-6 text-center lg:text-left">
+                  <div className="inline-block px-2.5 py-1 bg-[#f1f1f0] text-[#787774] text-[10px] font-medium uppercase tracking-widest rounded-md">{selectedEntry.category || '메모장'}</div>
+                  <h1 className="text-[52px] font-medium leading-[1.05] tracking-tighter text-[#1a1a1a]">
+                    {selectedEntry.title || '제목 없음'}
+                  </h1>
 
-              {/* Date Header */}
-              <div className="flex items-baseline gap-3 mb-3">
-                <h3 className="text-xl font-bold text-[#37352f]">
-                  {format(parseISO(entry.date), 'M월 d일', { locale: ko })}
-                </h3>
-                <span className="text-sm text-[#9b9a97]">
-                  {format(parseISO(entry.date), 'EEEE', { locale: ko })}
-                </span>
-                <span className="text-xs text-[#d3d1cb] font-mono">
-                  {format(parseISO(entry.date), 'a h:mm')}
-                </span>
-              </div>
+                  <div className="flex items-center justify-between border-b border-[#f1f1f0] pb-8">
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2 text-xs text-[#9b9a97]">
+                        <span className="font-medium text-[#37352f]">작성일</span>
+                        <span className="w-px h-2 bg-[#e9e9e8]" />
+                        <span className="font-medium text-[#787774]">
+                          {formatFullDate(selectedEntry.date)}
+                        </span>
+                      </div>
+                    </div>
 
-              {/* Card */}
-              <div className="bg-white p-6 rounded-xl border border-[#e9e9e8] shadow-sm hover:shadow-md hover:border-[#d3d1cb] transition-all relative">
-                <p className="whitespace-pre-wrap leading-relaxed text-[#37352f] mb-4">
-                  {entry.content}
-                </p>
-
-                <div className={`
-                    inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border
-                    ${getMoodColor(entry.mood)}
-                `}>
-                  {getMoodIcon(entry.mood, 14)}
-                  {entry.mood === 'good' ? '기분 좋음' : entry.mood === 'neutral' ? '그저 그럼' : '기분 나쁨'}
+                    <div className="relative" ref={actionMenuRef}>
+                      <button
+                        onClick={() => setShowActions(!showActions)}
+                        className="p-1.5 hover:bg-[#efefef] rounded transition-colors text-[#9b9a97] hover:text-[#37352f]"
+                      >
+                        <MoreVertical size={20} />
+                      </button>
+                      {showActions && (
+                        <div className="absolute right-0 mt-1 w-32 bg-white border border-[#e9e9e8] rounded-[4px] shadow-lg z-20 py-1 animate-in fade-in zoom-in-95 duration-100">
+                          <button onClick={handleEdit} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-[#37352f] hover:bg-[#efefef] transition-colors text-left">
+                            <Edit3 size={14} className="text-[#9b9a97]" /> 수정하기
+                          </button>
+                          <button onClick={handleDelete} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left">
+                            <Trash2 size={14} /> 삭제하기
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <button
-                  onClick={() => onDeleteEntry(entry.id)}
-                  className="absolute top-4 right-4 text-[#d3d1cb] hover:text-[#eb5757] hover:bg-[#f7f7f5] p-2 rounded transition-all opacity-0 group-hover:opacity-100"
-                >
-                  <Trash2 size={16} />
-                </button>
+                <div className="space-y-16">
+                  <div className="text-[19px] leading-[1.9] text-[#37352f] whitespace-pre-wrap min-h-[400px] prose prose-slate max-w-none">
+                    {selectedEntry.content}
+                  </div>
+
+                  {/* AI Comment Section */}
+                  {selectedEntry.comments && selectedEntry.comments.length > 0 && (
+                    <div className="pt-16 border-t border-[#f1f1f0] space-y-10">
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquare size={20} className="text-[#37352f]" />
+                        <h3 className="text-lg font-medium tracking-tight">AI의 반응</h3>
+                      </div>
+
+                      <div className="space-y-8">
+                        {selectedEntry.comments.map(comment => (
+                          <div key={comment.id} className="flex gap-4">
+                            <div className="w-8 h-8 rounded-full bg-[#f7f7f5] flex items-center justify-center text-sm flex-shrink-0 mt-1">
+                              {comment.authorEmoji}
+                            </div>
+                            <div className="flex-1 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-[#37352f]">{comment.authorName}</span>
+                                <span className="text-[11px] text-[#9b9a97]">{formatFullDate(comment.timestamp)}</span>
+                              </div>
+                              <p className="text-[15px] leading-relaxed text-[#37352f]">{comment.content}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          ))
-        )}
+          ) : (
+            <div className="h-[70vh] flex flex-col items-center justify-center text-[#d3d1cb] space-y-6">
+              <div className="p-10 bg-[#f7f7f5] rounded-3xl border border-[#e9e9e8]">
+                <BookOpen size={64} className="opacity-20 text-[#37352f]" strokeWidth={1} />
+              </div>
+              <div className="text-center space-y-2">
+                <p className="text-2xl font-medium text-[#37352f]">남기고 싶은 메모가 있나요?</p>
+                <p className="text-sm text-[#787774]">중요한 생각이나 기록하고 싶은 순간을 지금 바로 남겨보세요.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingId(null);
+                  setNewTitle('');
+                  setNewContent('');
+                  setIsWriting(true);
+                }}
+                className="px-10 py-4 bg-[#37352f] text-white font-medium rounded-full hover:bg-black transition-all shadow-xl"
+              >
+                첫 메모 남기기
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

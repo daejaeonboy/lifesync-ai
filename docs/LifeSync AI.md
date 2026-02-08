@@ -26,7 +26,9 @@
 | 프레임워크 | React + TypeScript |
 | 빌드 도구 | Vite |
 | 스타일링 | Tailwind CSS |
-| 상태 관리 | React useState + localStorage |
+| 상태 관리 | React useState + Supabase Sync |
+| 백엔드/DB | Supabase (PostgreSQL) |
+| 인증 | Supabase Auth (Google OAuth) |
 | 날짜 처리 | date-fns |
 
 ---
@@ -56,6 +58,9 @@
 
 ### 🔍 검색/기록
 통합 검색 + 활동 이력 추적
+
+### ☁️ 클라우드 동기화
+모든 데이터 실시간 백업 및 멀티 디바이스 연동
 
 ---
 

@@ -23,8 +23,10 @@ import {
   Frown,
   MapPin,
   MessageCircle,
-  Search
+  Search,
+  GripVertical
 } from 'lucide-react';
+
 
 export {
   LayoutDashboard,
@@ -51,5 +53,6 @@ export {
   Frown,
   MapPin,
   MessageCircle,
-  Search
+  Search,
+  GripVertical
 };

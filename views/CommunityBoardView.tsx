@@ -1,179 +1,279 @@
-import React from 'react';
-import { CommunityPost, AIAgent, CalendarEvent, Todo, JournalEntry } from '../types';
-import { formatDistanceToNow, parseISO } from 'date-fns';
+import React, { useEffect, useState, useRef } from 'react';
+import { CommunityPost, AIAgent, Comment } from '../types';
+import { format, parseISO, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
-
-// Default AI Agents Configuration - 3명
-const DEFAULT_AGENTS: AIAgent[] = [
-    { id: 'ARIA', name: '아리아', emoji: '🧮', role: '분석가', personality: '', tone: '', color: '#37352f' },
-    { id: 'MOMO', name: '모모', emoji: '💛', role: '응원단장', personality: '', tone: '', color: '#37352f' },
-    { id: 'SAGE', name: '세이지', emoji: '🎯', role: '전략가', personality: '', tone: '', color: '#37352f' },
-];
+import {
+    ChevronRight,
+    Sparkles,
+    MoreVertical,
+    Edit3,
+    Trash2,
+    MessageSquare,
+    Send
+} from 'lucide-react';
 
 interface CommunityBoardViewProps {
-    events: CalendarEvent[];
-    todos: Todo[];
-    entries: JournalEntry[];
     agents: AIAgent[];
     posts: CommunityPost[];
+    selectedId: string | null;
+    onSelectId: (id: string | null) => void;
+    selectedAgentId: string;
+    onUpdatePost: (id: string, updates: Partial<CommunityPost>) => void;
+    onDeletePost: (id: string) => void;
+    onAddComment: (postId: string, comment: Omit<Comment, 'id' | 'timestamp'>) => void;
 }
 
 const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
-    agents,
-    posts,
+    agents = [],
+    posts = [],
+    selectedId,
+    selectedAgentId,
+    onSelectId,
+    onUpdatePost,
+    onDeletePost,
+    onAddComment
 }) => {
-    const getAgentById = (id: AIAgent['id']) => agents.find(a => a.id === id) || DEFAULT_AGENTS.find(a => a.id === id) || DEFAULT_AGENTS[0];
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedContent, setEditedContent] = useState('');
+    const [showActions, setShowActions] = useState(false);
+    const [commentInput, setCommentInput] = useState('');
+    const actionMenuRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const sortedPosts = [...posts].sort((a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    // Sync selectedId with filtered entries
+    useEffect(() => {
+        if (isEditing) return;
+        const filtered = posts.filter(p => p.author === selectedAgentId);
+        const isCurrentValid = filtered.some(p => p.id === selectedId);
 
-    // Group posts by thread (replyTo)
-    const threadedPosts = sortedPosts.reduce((acc, post) => {
-        if (!post.replyTo) {
-            acc.push({ parent: post, replies: [] });
+        if (filtered.length > 0) {
+            if (!selectedId || !isCurrentValid) {
+                const sorted = [...filtered].sort((a, b) =>
+                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                );
+                onSelectId(sorted[0].id);
+            }
         } else {
-            const thread = acc.find(t => t.parent.id === post.replyTo);
-            if (thread) {
-                thread.replies.push(post);
-            } else {
-                acc.push({ parent: post, replies: [] });
+            if (selectedId !== null) {
+                onSelectId(null);
             }
         }
-        return acc;
-    }, [] as { parent: CommunityPost; replies: CommunityPost[] }[]);
+    }, [posts, selectedId, selectedAgentId, onSelectId, isEditing]);
+
+    // Click outside handler
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) {
+                setShowActions(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Auto-resize textarea
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+        }
+    }, [editedContent, isEditing]);
+
+    const handleEdit = () => {
+        const post = posts.find(p => p.id === selectedId);
+        if (!post) return;
+        setEditedContent(post.content);
+        setIsEditing(true);
+        setShowActions(false);
+    };
+
+    const handleSave = () => {
+        if (!selectedId) return;
+        onUpdatePost(selectedId, { content: editedContent });
+        setIsEditing(false);
+    };
+
+    const handleSubmitComment = () => {
+        if (!selectedId || !commentInput.trim()) return;
+        onAddComment(selectedId, {
+            authorId: 'USER',
+            authorName: '나',
+            authorEmoji: '👤',
+            content: commentInput.trim()
+        });
+        setCommentInput('');
+    };
+
+    const formatFullDate = (dateStr: string) => {
+        try {
+            const date = parseISO(dateStr);
+            if (!isValid(date)) return '날짜 정보가 없습니다';
+            return format(date, 'yyyy년 M월 d일 HH:mm', { locale: ko });
+        } catch (e) {
+            return '날짜 정보가 없습니다';
+        }
+    };
+
+    const selectedPost = (posts || []).find(p => p.id === selectedId);
+    const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
     return (
-        <div className="max-w-[720px] mx-auto text-[#37352f] px-4 py-8 font-sans">
-            {/* Minimal Header */}
-            <div className="mb-12 text-center">
-                <div className="inline-flex items-center gap-2 mb-2 px-3 py-1 bg-[#f0f0f0] rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-[#37352f] animate-pulse"></span>
-                    <span className="text-xs font-medium text-[#787774] tracking-wide uppercase">AI Community Live</span>
-                </div>
-                <h1 className="text-3xl font-bold tracking-tight mb-2 text-[#2f2f2f]">나의 디지털 자문단</h1>
-                <p className="text-[#9b9a97] text-sm">3명의 AI가 당신의 일상을 함께 고민하고 응원합니다.</p>
-            </div>
-
-            {/* Elegant Agent Avatars Row */}
-            <div className="flex justify-center mb-16">
-                <div className="flex -space-x-4 items-center">
-                    {agents.map((agent, index) => (
-                        <div key={agent.id} className="relative group z-0 hover:z-10 transition-all duration-300 hover:-translate-y-2">
-                            <div
-                                className="w-14 h-14 rounded-full flex items-center justify-center text-2xl shadow-md border-[3px] border-white transition-all group-hover:shadow-xl bg-[#f7f7f5]"
-                            >
-                                <span className="drop-shadow-sm filter">{agent.emoji}</span>
-                            </div>
-                            <div className="opacity-0 group-hover:opacity-100 absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap bg-black/80 text-white text-xs py-1 px-2 rounded transition-opacity duration-300 pointer-events-none">
-                                {agent.name}
-                            </div>
-                        </div>
-                    ))}
+        <div className="flex flex-col h-full bg-white relative">
+            <div className="h-14 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-10 flex-shrink-0">
+                <div className="flex items-center gap-2 overflow-hidden text-sm font-medium text-[#9b9a97]">
+                    {selectedPost && selectedAgent ? (
+                        <>
+                            <span className="truncate max-w-[120px] font-medium">{selectedAgent.name}</span>
+                            <ChevronRight size={14} className="opacity-40" />
+                            <span className="truncate max-w-[200px] text-[#37352f] font-medium">
+                                {isEditing ? '편집 중' : 'AI 일기'}
+                            </span>
+                        </>
+                    ) : (
+                        <span className="text-[#37352f] font-medium">AI 일기장</span>
+                    )}
                 </div>
             </div>
 
-            {/* Posts Feed: Modern Card Style */}
-            <div className="space-y-12 relative">
-                {/* Vertical Guide Line */}
-                <div className="absolute left-[27px] top-6 bottom-0 w-[2px] bg-[#e9e9e8] z-[-1]" />
-
-                {sortedPosts.length === 0 ? (
-                    <div className="text-center py-24 px-8 bg-[#fbfbfa] rounded-3xl border border-[#e9e9e8] border-dashed">
-                        <div className="text-5xl mb-6 opacity-30 grayscale filter blur-[1px]">🎭</div>
-                        <h3 className="text-lg font-semibold mb-2 text-[#5a5a5a]">대화가 시작되기를 기다리고 있어요</h3>
-                        <p className="text-[#9b9a97] text-sm mb-6 leading-relaxed max-w-sm mx-auto">
-                            할 일을 완료하거나 일기를 쓰면<br />
-                            AI들이 자동으로 이야기를 시작합니다.
-                        </p>
-                    </div>
-                ) : (
-                    threadedPosts.map(thread => {
-                        const parentAgent = getAgentById(thread.parent.author);
-
-                        return (
-                            <div key={thread.parent.id} className="relative group animate-[scaleIn_0.3s_ease-out]">
-                                {/* Parent Post */}
-                                <div className="flex gap-5">
-                                    {/* Avatar Column */}
-                                    <div className="flex-shrink-0 relative">
-                                        <div
-                                            className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl shadow-sm border border-black/5 z-10 relative bg-white"
-                                        >
-                                            {parentAgent.emoji}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="max-w-[800px] mx-auto py-20 px-10 w-full animate-in fade-in duration-500">
+                    {selectedPost ? (
+                        <div className="space-y-12">
+                            <div className="space-y-8">
+                                <div className="space-y-6 text-center lg:text-left">
+                                    <div className="flex items-center gap-2 mb-2 lg:justify-start justify-center">
+                                        <span className="text-xl">{selectedAgent?.emoji}</span>
+                                        <div className="inline-block px-2.5 py-1 bg-[#f7f7f5] text-[#37352f] text-[10px] font-medium uppercase tracking-widest rounded-md">
+                                            {selectedAgent?.name} 페르소나
                                         </div>
                                     </div>
 
-                                    {/* Content Column */}
-                                    <div className="flex-1 pt-1">
-                                        {/* Meta Header */}
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className="font-bold text-[15px] text-[#37352f]">{parentAgent.name}</span>
-                                            <span className="text-[10px] text-[#9b9a97] uppercase tracking-wider font-medium bg-[#f5f5f5] px-1.5 py-0.5 rounded-md">
-                                                {parentAgent.role}
-                                            </span>
-                                            <span className="text-xs text-[#d3d1cb] font-medium ml-auto">
-                                                {formatDistanceToNow(parseISO(thread.parent.timestamp), { addSuffix: true, locale: ko })}
-                                            </span>
+                                    <h1 className="text-[52px] font-medium leading-[1.05] tracking-tighter text-[#1a1a1a]">
+                                        AI의 기록
+                                    </h1>
+
+                                    <div className="flex items-center justify-between border-b border-[#f1f1f0] pb-8">
+                                        <div className="flex flex-col gap-0.5">
+                                            <div className="flex items-center gap-2 text-xs text-[#9b9a97]">
+                                                <span className="font-medium text-[#37352f]">생성일</span>
+                                                <span className="w-px h-2 bg-[#e9e9e8]" />
+                                                <span className="font-medium text-[#787774]">
+                                                    {formatFullDate(selectedPost.timestamp)}
+                                                </span>
+                                            </div>
                                         </div>
 
-                                        {/* Bubble */}
-                                        <div className="bg-white p-5 rounded-2xl rounded-tl-none shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[#f0f0f0] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] hover:border-[#e5e5e5] transition-all">
-                                            <p className="text-[#2d2d2d] leading-7 text-[15px] whitespace-pre-line">
-                                                {thread.parent.content}
-                                            </p>
-
-                                            {thread.parent.trigger && (
-                                                <div className="mt-4 pt-3 border-t border-[#f5f5f5] flex items-center gap-2">
-                                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-[#fafafa] rounded text-[11px] text-[#9b9a97] font-medium border border-[#f0f0f0]">
-                                                        {thread.parent.trigger === 'todo_completed' && '✅ 할 일 완료'}
-                                                        {thread.parent.trigger === 'todo_added' && '✨ 할 일 추가'}
-                                                        {thread.parent.trigger === 'event_added' && '📅 일정 등록'}
-                                                        {thread.parent.trigger === 'journal_added' && '✍️ 일기 작성'}
-                                                        {thread.parent.trigger === 'chat_message' && '💬 대화 중'}
+                                        {!isEditing && (
+                                            <div className="relative" ref={actionMenuRef}>
+                                                <button
+                                                    onClick={() => setShowActions(!showActions)}
+                                                    className="p-1.5 hover:bg-[#efefef] rounded transition-colors text-[#9b9a97] hover:text-[#37352f]"
+                                                >
+                                                    <MoreVertical size={20} />
+                                                </button>
+                                                {showActions && (
+                                                    <div className="absolute right-0 mt-1 w-32 bg-white border border-[#e9e9e8] rounded-[4px] shadow-lg z-20 py-1 animate-in fade-in zoom-in-95 duration-100">
+                                                        <button onClick={handleEdit} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-[#37352f] hover:bg-[#efefef] transition-colors text-left font-medium">
+                                                            <Edit3 size={14} className="text-[#9b9a97]" /> 수정하기
+                                                        </button>
+                                                        <button onClick={() => { onDeletePost(selectedPost.id); setShowActions(false); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left font-medium">
+                                                            <Trash2 size={14} /> 삭제하기
+                                                        </button>
                                                     </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Replies Section */}
-                                        {thread.replies.length > 0 && (
-                                            <div className="mt-4 space-y-3 pl-2">
-                                                {thread.replies.map(reply => {
-                                                    const replyAgent = getAgentById(reply.author);
-                                                    return (
-                                                        <div key={reply.id} className="flex gap-3 items-start relative animate-[fadeIn_0.4s_ease-out]">
-                                                            {/* Connector Line */}
-                                                            <div className="absolute -left-[19px] top-4 w-4 h-[1px] bg-[#e5e5e5]"></div>
-                                                            <div className="absolute -left-[19px] -top-6 bottom-4 w-[1px] bg-[#e5e5e5] rounded-bl-lg"></div>
-
-                                                            <div
-                                                                className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0 shadow-sm bg-white border border-[#f0f0f0]"
-                                                            >
-                                                                {replyAgent.emoji}
-                                                            </div>
-                                                            <div className="bg-[#fbfbfa] px-4 py-3 rounded-xl rounded-tl-none border border-[#f0f0f0] hover:bg-white hover:shadow-sm transition-all flex-1">
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="font-semibold text-xs text-[#555]">{replyAgent.name}</span>
-                                                                    <span className="text-[10px] text-[#ccc]">
-                                                                        {formatDistanceToNow(parseISO(reply.timestamp), { addSuffix: true, locale: ko })}
-                                                                    </span>
-                                                                </div>
-                                                                <p className="text-[#444] text-[13px] leading-relaxed">
-                                                                    {reply.content}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
+                                                )}
                                             </div>
                                         )}
                                     </div>
                                 </div>
+
+                                {isEditing ? (
+                                    <div className="space-y-6">
+                                        <textarea
+                                            ref={textareaRef}
+                                            value={editedContent}
+                                            onChange={e => setEditedContent(e.target.value)}
+                                            className="w-full text-[19px] leading-[1.9] text-[#37352f] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden"
+                                            autoFocus
+                                        />
+                                        <div className="flex justify-end gap-3 pt-8 border-t border-[#f1f1f0]">
+                                            <button onClick={() => setIsEditing(false)} className="px-5 py-2 text-sm font-medium text-[#787774] hover:bg-[#f5f5f5] rounded-lg transition-colors">취소</button>
+                                            <button onClick={handleSave} className="px-8 py-2 bg-[#37352f] text-white text-sm font-medium rounded-lg hover:bg-black transition-all shadow-lg">수정 내용 저장</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-16">
+                                        <div className="text-[19px] leading-[1.9] text-[#37352f] whitespace-pre-wrap min-h-[400px] prose prose-slate max-w-none">
+                                            {selectedPost.content}
+                                        </div>
+
+                                        {/* Comment Section */}
+                                        <div className="pt-16 border-t border-[#f1f1f0] space-y-10">
+                                            <div className="flex items-center gap-2.5">
+                                                <MessageSquare size={20} className="text-[#37352f]" />
+                                                <h3 className="text-lg font-medium tracking-tight">댓글 {selectedPost.comments?.length || 0}</h3>
+                                            </div>
+
+                                            <div className="space-y-8">
+                                                {selectedPost.comments?.map(comment => (
+                                                    <div key={comment.id} className="flex gap-4 group">
+                                                        <div className="w-8 h-8 rounded-full bg-[#f7f7f5] flex items-center justify-center text-sm flex-shrink-0 mt-1">
+                                                            {comment.authorEmoji}
+                                                        </div>
+                                                        <div className="flex-1 space-y-1.5">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[#37352f]">{comment.authorName}</span>
+                                                                <span className="text-[11px] text-[#9b9a97]">{formatFullDate(comment.timestamp)}</span>
+                                                            </div>
+                                                            <p className="text-[15px] leading-relaxed text-[#37352f]">{comment.content}</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                <div className="flex gap-4 pt-4">
+                                                    <div className="w-8 h-8 rounded-full bg-[#f7f7f5] flex items-center justify-center text-sm flex-shrink-0 mt-1">
+                                                        👤
+                                                    </div>
+                                                    <div className="flex-1 relative">
+                                                        <textarea
+                                                            value={commentInput}
+                                                            onChange={e => setCommentInput(e.target.value)}
+                                                            placeholder="기록에 대한 생각을 남겨보세요..."
+                                                            className="w-full bg-[#f7f7f5] border-none rounded-2xl px-4 py-3 text-[15px] focus:ring-1 focus:ring-[#37352f] transition-all outline-none resize-none pr-12 min-h-[46px]"
+                                                            rows={1}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    handleSubmitComment();
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={handleSubmitComment}
+                                                            disabled={!commentInput.trim()}
+                                                            className="absolute right-2 top-1.5 p-2 text-[#37352f] hover:bg-white rounded-full transition-all disabled:opacity-20"
+                                                        >
+                                                            <Send size={18} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        );
-                    })
-                )}
+                        </div>
+                    ) : (
+                        <div className="h-[70vh] flex flex-col items-center justify-center text-[#d3d1cb] space-y-6">
+                            <div className="p-10 bg-[#f7f7f5] rounded-3xl border border-[#e9e9e8]">
+                                <Sparkles size={64} className="opacity-20 text-[#37352f]" strokeWidth={1} />
+                            </div>
+                            <div className="text-center space-y-2">
+                                <p className="text-2xl font-medium text-[#37352f]">아직 AI의 기록이 없어요</p>
+                                <p className="text-sm text-[#787774]">당신의 메모를 바탕으로 AI가 새로운 관점의 일기를 작성해줄 거예요.</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

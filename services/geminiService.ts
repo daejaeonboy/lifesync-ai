@@ -1,15 +1,19 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CalendarEvent, JournalEntry, Todo, AiPost } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateLifeInsight = async (
+  apiKey: string,
   events: CalendarEvent[],
   todos: Todo[],
   journalEntries: JournalEntry[]
 ): Promise<AiPost> => {
+  if (!apiKey) {
+    throw new Error("API Key가 설정되지 않았습니다. 설정 > AI 페르소나 설정에서 키를 입력해주세요.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const today = new Date().toISOString().split('T')[0];
-  
+
   // Prepare data context
   const contextData = {
     currentDate: today,
@@ -52,9 +56,9 @@ export const generateLifeInsight = async (
           properties: {
             title: { type: Type.STRING },
             content: { type: Type.STRING },
-            tags: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING } 
+            tags: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
             }
           },
           required: ["title", "content", "tags"]
@@ -69,7 +73,8 @@ export const generateLifeInsight = async (
       title: result.title,
       content: result.content,
       tags: result.tags || ['Insight', 'Daily'],
-      createdAt: new Date().toISOString(),
+      date: new Date().toISOString(),
+      type: 'analysis'
     };
   } catch (error) {
     console.error("Gemini generation failed:", error);
