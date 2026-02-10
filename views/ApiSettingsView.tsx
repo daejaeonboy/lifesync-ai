@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+﻿import React, { useMemo, useState } from 'react';
 import { AppSettings, ApiConnection } from '../types';
 import { Trash2, Plus, X, CheckCircle2, Circle, FlaskConical } from 'lucide-react';
 import { callGeminiAPI } from '../utils/gemini';

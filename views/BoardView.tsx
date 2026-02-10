@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { AiPost, CalendarEvent, Todo, JournalEntry, AppSettings } from '../types';
 import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, Layout, CalendarIcon, CheckSquare, BookOpen, ChevronRight, Check } from '../components/Icons';
@@ -15,9 +15,10 @@ interface BoardViewProps {
   onAddPost: (post: AiPost) => void;
   onDeletePost: (id: string) => void;
   onToggleTodo: (id: string) => void;
+  onViewAllTodos?: () => void;
 }
 
-const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, settings, onAddPost, onDeletePost, onToggleTodo }) => {
+const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, settings, onAddPost, onDeletePost, onToggleTodo, onViewAllTodos }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const activeGeminiConfig = getActiveGeminiConfig(settings);
 
@@ -168,16 +169,30 @@ const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, se
               ) : (
                 <div>
                   {pendingTodos.map(todo => (
-                    <div key={todo.id} className="flex items-center p-3 hover:bg-[#f7f7f5] rounded-lg transition-colors group cursor-pointer" onClick={() => onToggleTodo(todo.id)}>
+                    <button
+                      key={todo.id}
+                      type="button"
+                      className="w-full flex items-center p-3 hover:bg-[#f7f7f5] rounded-lg transition-colors group cursor-pointer text-left"
+                      onClick={() => onToggleTodo(todo.id)}
+                    >
                       <div className="w-4 h-4 rounded border border-[#d3d1cb] flex items-center justify-center mr-3 group-hover:border-[#37352f] transition-colors">
                         {/* Custom Checkbox */}
                       </div>
                       <span className="text-sm text-[#37352f] flex-1">{todo.text}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
-              {pendingTodos.length > 0 && <div className="p-2 text-center border-t border-[#f7f7f5] text-xs text-[#9b9a97] cursor-pointer hover:text-[#37352f]">전체 보기</div>}
+              {pendingTodos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onViewAllTodos}
+                  disabled={!onViewAllTodos}
+                  className="w-full p-2 text-center border-t border-[#f7f7f5] text-xs text-[#9b9a97] hover:text-[#37352f] disabled:cursor-default disabled:hover:text-[#9b9a97]"
+                >
+                  전체 보기
+                </button>
+              )}
             </div>
           </section>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { CalendarEvent, CalendarTag } from '../types';
 import { ChevronLeft, ChevronRight, Plus, X, Trash2, CalendarIcon, Check, Clock, AlignLeft } from '../components/Icons';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, parseISO, isToday as dfIsToday } from 'date-fns';

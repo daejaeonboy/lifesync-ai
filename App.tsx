@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
-import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext } from './types';
+﻿import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
+import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext, ChatSession, ChatMessage } from './types';
 import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
@@ -12,8 +12,6 @@ import PersonaSettingsView, { DEFAULT_AGENTS } from './views/PersonaSettingsView
 import ApiSettingsView from './views/ApiSettingsView';
 import ChatView from './views/ChatView';
 import AuthView from './views/AuthView';
-import LandingView from './views/LandingView';
-import { generateCommunityPosts } from './utils/triggerEngine';
 import { getActiveGeminiConfig } from './utils/aiConfig';
 import { normalizeKoreanText } from './utils/encodingFix';
 
@@ -31,6 +29,17 @@ const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
 const saveToStorage = (key: string, data: any) => {
   localStorage.setItem(key, JSON.stringify(data));
 };
+
+const normalizeCommunityPost = (post: any): CommunityPost => ({
+  id: post.id,
+  author: post.author,
+  content: post.content,
+  timestamp: typeof post.timestamp === 'string' ? post.timestamp : new Date(post.timestamp).toISOString(),
+  replyTo: post.replyTo ?? post.reply_to ?? undefined,
+  trigger: post.trigger,
+  order: typeof post.order === 'number' ? post.order : 0,
+  comments: Array.isArray(post.comments) ? post.comments : undefined,
+});
 
 const DEFAULT_TAGS: CalendarTag[] = [
   { id: 'tag_1', name: '일정', color: '#4c2889' },
@@ -104,6 +113,11 @@ const App: React.FC = () => {
   });
 
   // Activity Log & Settings
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => {
+    const stored = loadFromStorage('ls_chat_sessions', []);
+    return Array.isArray(stored) ? stored : [];
+  });
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => loadFromStorage('ls_active_chat_id', null));
   const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => loadFromStorage('ls_activity', []));
   const [settings, setSettings] = useState<AppSettings>(() => {
     const storedSettings = loadFromStorage<any>('ls_settings', {
@@ -209,74 +223,77 @@ const App: React.FC = () => {
   useEffect(() => saveToStorage('ls_current_view', currentView), [currentView]);
   useEffect(() => saveToStorage('ls_calendar_tags', calendarTags), [calendarTags]);
   useEffect(() => saveToStorage('ls_journal_categories', journalCategories), [journalCategories]);
+  useEffect(() => saveToStorage('ls_chat_sessions', chatSessions), [chatSessions]);
+  useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
+  useEffect(() => {
+    if (currentUser) {
+      saveToStorage('lifesync_user', currentUser);
+    } else {
+      localStorage.removeItem('lifesync_user');
+    }
+  }, [currentUser]);
   // Supabase Auth Listener & Initial Sync
   useEffect(() => {
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Fetch existing profile or sync
-        let { data: profile } = await supabase
+    const resolveProfile = async (user: any) => {
+      let { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile) {
+        const { data: newProfile, error: insertError } = await supabase
           .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
+          .insert([{
+            id: user.id,
+            name: user.user_metadata?.full_name || user.email?.split('@')[0],
+            gemini_api_key: ''
+          }])
+          .select()
           .single();
 
-        if (!profile) {
-          // Auto-create profile for OAuth / Social login users
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .insert([{
-              id: session.user.id,
-              name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-              gemini_api_key: ''
-            }])
-            .select()
-            .single();
-
-          if (!insertError) profile = newProfile;
-        }
-
-        setCurrentUser({
-          id: session.user.id,
-          email: session.user.email || '',
-          name: profile?.name || session.user.email?.split('@')[0],
-          geminiApiKey: profile?.gemini_api_key || ''
-        });
-
-        // Initial data fetch from Supabase
-        fetchUserData(session.user.id);
+        if (!insertError) profile = newProfile;
       }
+
+      return profile;
+    };
+
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setCurrentUser(null);
+        return;
+      }
+
+      const profile = await resolveProfile(session.user);
+      setCurrentUser({
+        id: session.user.id,
+        email: session.user.email || '',
+        name: profile?.name || session.user.email?.split('@')[0],
+        geminiApiKey: profile?.gemini_api_key || ''
+      });
+
+      // Initial data fetch from Supabase
+      fetchUserData(session.user.id);
     };
 
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        let { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-
-        if (!profile) {
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .insert([{
-              id: session.user.id,
-              name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-              gemini_api_key: ''
-            }])
-            .select()
-            .single();
-          if (!insertError) profile = newProfile;
-        }
-
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && session?.user) {
+        const profile = await resolveProfile(session.user);
         setCurrentUser({
           id: session.user.id,
           email: session.user.email || '',
           name: profile?.name || session.user.email?.split('@')[0],
           geminiApiKey: profile?.gemini_api_key || ''
         });
-        fetchUserData(session.user.id);
+
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          fetchUserData(session.user.id);
+        }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
-        // Reset local data or handled by page reload
       }
     });
 
@@ -391,7 +408,47 @@ const App: React.FC = () => {
       );
     }
     if (dbEvents) setEvents(dbEvents);
-    if (dbPosts) setCommunityPosts(dbPosts);
+
+    const localCommunityPosts = loadFromStorage<CommunityPost[]>('ls_community', [])
+      .map(normalizeCommunityPost)
+      .filter(post => !!post.id);
+    const normalizedDbPosts = (dbPosts || [])
+      .map(normalizeCommunityPost)
+      .filter(post => !!post.id);
+    const dbPostIds = new Set(normalizedDbPosts.map(post => post.id));
+    const unsyncedLocalPosts = localCommunityPosts.filter(post => !dbPostIds.has(post.id));
+
+    if (unsyncedLocalPosts.length > 0) {
+      const { error: postSyncError } = await supabase.from('community_posts').upsert(
+        unsyncedLocalPosts.map(post => ({
+          id: post.id,
+          user_id: userId,
+          author: post.author,
+          content: post.content,
+          timestamp: post.timestamp,
+          reply_to: post.replyTo,
+          trigger: post.trigger,
+          order: post.order ?? 0,
+        })),
+        { onConflict: 'id' }
+      );
+
+      if (postSyncError) {
+        console.error('Failed to sync local AI posts:', postSyncError);
+      }
+    }
+
+    const mergedPostsMap = new Map<string, CommunityPost>();
+    normalizedDbPosts.forEach(post => mergedPostsMap.set(post.id, post));
+    localCommunityPosts.forEach(localPost => {
+      const existing = mergedPostsMap.get(localPost.id);
+      mergedPostsMap.set(localPost.id, existing ? { ...existing, ...localPost } : localPost);
+    });
+
+    const mergedPosts = Array.from(mergedPostsMap.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    setCommunityPosts(mergedPosts);
   };
 
   const handleLogout = async () => {
@@ -417,16 +474,20 @@ const App: React.FC = () => {
     setCommunityPosts(prev => [postWithOrder, ...prev]);
 
     if (currentUser) {
-      await supabase.from('community_posts').insert([{
-        id: post.id,
+      const { error } = await supabase.from('community_posts').insert([{
+        id: postWithOrder.id,
         user_id: currentUser.id,
-        author: post.author,
-        content: post.content,
-        timestamp: post.timestamp,
-        reply_to: post.replyTo,
-        trigger: post.trigger,
+        author: postWithOrder.author,
+        content: postWithOrder.content,
+        timestamp: postWithOrder.timestamp,
+        reply_to: postWithOrder.replyTo,
+        trigger: postWithOrder.trigger,
         "order": newOrder
       }]);
+
+      if (error) {
+        console.error('Failed to persist AI post:', error);
+      }
     }
   };
 
@@ -438,6 +499,15 @@ const App: React.FC = () => {
     if (window.confirm('정말로 이 AI 게시글을 삭제하시겠습니까?')) {
       setCommunityPosts(prev => prev.filter(p => p.id !== id));
       if (selectedAiPostId === id) setSelectedAiPostId(null);
+
+      if (currentUser) {
+        supabase.from('community_posts').delete().eq('id', id).eq('user_id', currentUser.id)
+          .then(({ error }) => {
+            if (error) {
+              console.error('Failed to delete AI post:', error);
+            }
+          });
+      }
     }
   };
 
@@ -494,14 +564,20 @@ const App: React.FC = () => {
       }));
     };
 
-    generateCommunityPosts(
-      enrichedContext,
-      aiAgents,
-      addCommunityPost,
-      activeGeminiConfig?.apiKey,
-      updateUsage,
-      activeGeminiConfig?.modelName
-    );
+    import('./utils/triggerEngine')
+      .then(({ generateCommunityPosts }) =>
+        generateCommunityPosts(
+          enrichedContext,
+          aiAgents,
+          addCommunityPost,
+          activeGeminiConfig?.apiKey,
+          updateUsage,
+          activeGeminiConfig?.modelName
+        )
+      )
+      .catch((error) => {
+        console.error('Failed to load triggerEngine for AI reactions:', error);
+      });
   };
 
   useEffect(() => {
@@ -1263,8 +1339,58 @@ const App: React.FC = () => {
             agents={aiAgents}
           />
         );
-      case 'chat':
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} agent={aiAgents[0]} onUserMessage={(text) => triggerAI({ trigger: 'chat_message', data: { text } })} />;
+      case 'chat': {
+        const activeSession = chatSessions.find(s => s.id === activeChatSessionId);
+        return (
+          <ChatView
+            events={events}
+            todos={todos}
+            entries={entries}
+            posts={posts}
+            todoLists={todoLists}
+            onAddEvent={addEvent}
+            onAddTodo={addTodo}
+            onAddEntry={addEntry}
+            onAddPost={addPost}
+            requireConfirm={settings.chatActionConfirm}
+            settings={settings}
+            agent={aiAgents[0]}
+            onUserMessage={(text) => {
+              if (!activeChatSessionId) {
+                const newId = crypto.randomUUID();
+                const newSession: ChatSession = {
+                  id: newId,
+                  title: text.slice(0, 20) + (text.length > 20 ? '...' : ''),
+                  messages: [],
+                  createdAt: new Date().toISOString(),
+                  lastMessageAt: new Date().toISOString()
+                };
+                setChatSessions(prev => [newSession, ...prev]);
+                setActiveChatSessionId(newId);
+              }
+              triggerAI({ trigger: 'chat_message', data: { text } });
+            }}
+            initialMessages={activeSession?.messages}
+            currentSessionId={activeChatSessionId}
+            onUpdateMessages={(sessionId: string, messages: ChatMessage[]) => {
+              setChatSessions((prev: ChatSession[]) => prev.map((s: ChatSession) => {
+                if (s.id === sessionId) {
+                  // Auto-generate title from first message if it's '새 대화'
+                  let title = s.title;
+                  if (title === '새 대화' && messages.length > 0) {
+                    const firstUserMsg = messages.find((m: ChatMessage) => m.role === 'user');
+                    if (firstUserMsg) {
+                      title = firstUserMsg.content.slice(0, 20) + (firstUserMsg.content.length > 20 ? '...' : '');
+                    }
+                  }
+                  return { ...s, messages, title, lastMessageAt: new Date().toISOString() };
+                }
+                return s;
+              }));
+            }}
+          />
+        );
+      }
       case 'board':
         return (
           <CommunityBoardView
@@ -1331,12 +1457,17 @@ const App: React.FC = () => {
       <aside className="w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
         <div>
           {/* Logo Section */}
-          <div className="p-4 lg:p-5 flex items-center gap-3 group cursor-pointer" onClick={() => setCurrentView('chat')}>
+          <button
+            type="button"
+            className="w-full p-4 lg:p-5 flex items-center gap-3 group hover:bg-[#efefef] transition-colors text-left"
+            onClick={() => setCurrentView('chat')}
+            aria-label="채팅으로 이동"
+          >
             <div className="w-8 h-8 bg-[#37352f] text-white rounded-[10px] flex items-center justify-center transition-transform group-hover:rotate-6">
               <Sparkles size={16} />
             </div>
             <span className="hidden lg:block text-lg font-bold tracking-tight text-[#37352f]">LifeSync AI</span>
-          </div>
+          </button>
 
           <nav className="px-2 space-y-0.5">
             {navItems.map(item => (
@@ -1357,6 +1488,70 @@ const App: React.FC = () => {
               </button>
             ))}
           </nav>
+          {
+            currentView === 'chat' && (
+              <div className="hidden lg:block mt-6 pt-4 border-t border-[#e9e9e8] px-2">
+                <div className="flex items-center justify-between px-3 mb-2 group">
+                  <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">채팅 기록</span>
+                  <button
+                    onClick={() => {
+                      const newId = crypto.randomUUID();
+                      const newSession: ChatSession = {
+                        id: newId,
+                        title: '새 대화',
+                        messages: [],
+                        createdAt: new Date().toISOString(),
+                        lastMessageAt: new Date().toISOString()
+                      };
+                      setChatSessions(prev => [newSession, ...prev]);
+                      setActiveChatSessionId(newId);
+                    }}
+                    className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                <div className="space-y-0.5 overflow-y-auto max-h-[400px] scrollbar-hide">
+                  {chatSessions.length === 0 ? (
+                    <div className="px-3 py-2 text-[11px] text-[#9b9a97] italic">
+                      진행 중인 대화가 없습니다.
+                    </div>
+                  ) : (
+                    chatSessions
+                      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                      .map(session => (
+                        <div key={session.id} className="group relative">
+                          <button
+                            onClick={() => setActiveChatSessionId(session.id)}
+                            className={`w-full text-left px-3 py-1.5 rounded-[4px] transition-colors text-sm group ${activeChatSessionId === session.id
+                              ? 'bg-[#efefef] text-[#37352f] font-medium'
+                              : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'
+                              }`}
+                          >
+                            <div className="flex items-center">
+                              <MessageCircle size={14} className="mr-2.5 opacity-40 shrink-0" />
+                              <span className="truncate flex-1">{session.title}</span>
+                            </div>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm('이 대화 기록을 삭제하시겠습니까?')) {
+                                setChatSessions(prev => prev.filter(s => s.id !== session.id));
+                                if (activeChatSessionId === session.id) setActiveChatSessionId(null);
+                              }
+                            }}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 hover:bg-[#d9d9d8] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            )
+          }
 
           {
             currentView === 'board' && (
@@ -1426,7 +1621,13 @@ const App: React.FC = () => {
                               : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'
                               }`}
                           >
-                            <span className="mr-2 text-sm">{agent.emoji}</span>
+                            <div className="mr-2 flex-shrink-0">
+                              {agent.avatar ? (
+                                <img src={agent.avatar} alt={agent.name} className="w-5 h-5 rounded-full object-cover border border-[#e9e9e8]" />
+                              ) : (
+                                <span className="text-sm">{agent.emoji}</span>
+                              )}
+                            </div>
                             <span className="text-sm truncate">{agent.name}</span>
                             <span className="ml-2 text-[11px] opacity-40 font-medium">
                               {communityPosts.filter(p => p.author === agent.id).length}
@@ -1706,18 +1907,18 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Content Area */}
-      < main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white" >
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white">
         {/* Top Mobile Bar (Visible only on small screens) */}
-        < header className="lg:hidden h-12 bg-white border-b border-[#e9e9e8] flex items-center justify-center font-semibold text-sm z-40 relative" >
+        <header className="lg:hidden h-12 bg-white border-b border-[#e9e9e8] flex items-center justify-center font-semibold text-sm z-40 relative">
           LifeSync
-        </header >
+        </header>
 
         {/* Scrollable View Content */}
-        < div className={`flex-1 relative scroll-smooth ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className={`flex-1 relative scroll-smooth ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <div className={`h-full mx-auto ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'max-w-none p-0' : 'max-w-[1200px] p-4 lg:p-8 lg:pt-10'}`}>
             {renderView()}
           </div>
-        </div >
+        </div>
 
         {undoToast && (
           <div className="fixed bottom-6 right-6 z-50">
@@ -1732,8 +1933,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-      </main >
-    </div >
+      </main>
+    </div>
   );
 };
 

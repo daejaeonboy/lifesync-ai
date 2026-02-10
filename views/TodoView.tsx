@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { Todo, TodoList } from '../types';
 import { Check, ChevronRight, MoreVertical, CalendarIcon, Trash2, Plus, GripVertical } from '../components/Icons';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
@@ -35,7 +35,7 @@ interface TodoViewProps {
   onUpdateList: (id: string, updates: Partial<TodoList>) => void;
   onUpdateListOrder?: (lists: TodoList[]) => void;
   onAddTodo: (text: string, listId?: string, dueDate?: string) => void;
-  onUpdateTodo?: (id: string, updates: Partial<TodoList>) => void;
+  onUpdateTodo?: (id: string, updates: Partial<Todo>) => void;
   onToggleTodo: (id: string) => void;
   onDeleteTodo: (id: string) => void;
   onDeleteList: (id: string) => void;
@@ -45,7 +45,9 @@ interface TodoViewProps {
 
 // Checkbox Component
 const Checkbox = ({ checked, onClick }: { checked: boolean; onClick: (e: React.MouseEvent) => void }) => (
-  <div
+  <button
+    type="button"
+    aria-pressed={checked}
     className={`w-4 h-4 mt-0.5 rounded-full border flex-shrink-0 cursor-pointer transition-all flex items-center justify-center
       ${checked
         ? 'bg-[#1a73e8] border-[#1a73e8]'
@@ -54,7 +56,7 @@ const Checkbox = ({ checked, onClick }: { checked: boolean; onClick: (e: React.M
     onClick={onClick}
   >
     {checked && <Check size={10} className="text-white stroke-[3px]" />}
-  </div>
+  </button>
 );
 
 // Sortable Todo Item Component
@@ -109,6 +111,15 @@ const SortableTodoItem = ({
       style={style}
       className={`group relative px-3 py-2.5 rounded hover:bg-[#f5f5f5] hover:shadow-sm transition-all flex items-start gap-3 cursor-pointer ${isEditing ? 'bg-white shadow ring-2 ring-[#1a73e8] z-10' : ''}`}
       onClick={() => !isEditing && startEditing(todo)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          startEditing(todo);
+        }
+      }}
       {...attributes}
       {...listeners}
     >
@@ -353,12 +364,14 @@ const SortableList = ({
               <div className="space-y-0.5">
                 {completed.map((todo: Todo) => (
                   <div key={todo.id} className="group flex items-start gap-3 px-3 py-2.5 rounded hover:bg-[#f5f5f5]">
-                    <div
+                    <button
+                      type="button"
+                      aria-label="완료 취소"
                       className="w-4 h-4 mt-0.5 rounded-full bg-[#1a73e8] border border-[#1a73e8] flex-shrink-0 flex items-center justify-center cursor-pointer"
                       onClick={() => onToggleTodo(todo.id)}
                     >
                       <Check size={10} className="text-white stroke-[3px]" />
-                    </div>
+                    </button>
                     <span className="text-[14px] text-[#5f6368] line-through flex-1 decoration-[#5f6368]">{todo.text}</span>
                     <button
                       className="opacity-0 group-hover:opacity-100 text-[#5f6368] hover:text-[#d93025] p-1"

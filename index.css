@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 html,
 body,
 #root {
@@ -7,5 +9,18 @@ body,
 }
 
 body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Hide scrollbar utility */
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
 }

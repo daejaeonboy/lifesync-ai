@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+﻿import React, { useEffect, useState, useRef } from 'react';
 import { CommunityPost, AIAgent, Comment } from '../types';
 import { format, parseISO, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -21,6 +21,7 @@ interface CommunityBoardViewProps {
     onUpdatePost: (id: string, updates: Partial<CommunityPost>) => void;
     onDeletePost: (id: string) => void;
     onAddComment: (postId: string, comment: Omit<Comment, 'id' | 'timestamp'>) => void;
+    onUpdateOrder?: (newPosts: CommunityPost[]) => void;
 }
 
 const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
@@ -142,7 +143,13 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                             <div className="space-y-8">
                                 <div className="space-y-6 text-center lg:text-left">
                                     <div className="flex items-center gap-2 mb-2 lg:justify-start justify-center">
-                                        <span className="text-xl">{selectedAgent?.emoji}</span>
+                                        <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-lg bg-[#f7f7f5] border border-[#e9e9e8]">
+                                            {selectedAgent?.avatar ? (
+                                                <img src={selectedAgent.avatar} alt={selectedAgent.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <span>{selectedAgent?.emoji}</span>
+                                            )}
+                                        </div>
                                         <div className="inline-block px-2.5 py-1 bg-[#f7f7f5] text-[#37352f] text-[10px] font-medium uppercase tracking-widest rounded-md">
                                             {selectedAgent?.name} 페르소나
                                         </div>

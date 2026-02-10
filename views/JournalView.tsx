@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { JournalEntry, JournalCategory, Comment, AIAgent } from '../types';
 import {
   Trash2,
@@ -310,11 +310,11 @@ const JournalView: React.FC<JournalViewProps> = ({
 
                           return (
                             <div key={comment.id} className="flex gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-[#f7f7f5] flex items-center justify-center text-lg flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
-                                {avatar ? (
-                                  <img src={avatar} alt={comment.authorName} className="w-full h-full object-cover" />
+                              <div className="w-10 h-10 rounded-full bg-[#f7f7f5] flex items-center justify-center text-lg flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
+                                {(agent?.avatar) ? (
+                                  <img src={agent.avatar} alt={comment.authorName} className="w-full h-full object-cover" />
                                 ) : (
-                                  emoji
+                                  comment.authorEmoji || agent?.emoji || '🤖'
                                 )}
                               </div>
                               <div className="flex-1 space-y-1.5">

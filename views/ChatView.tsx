@@ -1,24 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent } from '../types';
+﻿import React, { useState, useRef, useEffect } from 'react';
+import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent, ChatMessage, ChatSession } from '../types';
 import { generateLifeInsight, generateChatResponse } from '../services/geminiService';
 import { Sparkles, ChevronRight } from '../components/Icons';
 import { format, parseISO, addDays, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { getActiveGeminiConfig } from '../utils/aiConfig';
-
-// Types for Chat Messages
-interface ChatMessage {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: Date;
-    action?: {
-        type: 'add_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
-        data?: any;
-        executed?: boolean;
-    };
-    quickReplies?: string[];
-}
 
 interface ChatViewProps {
     events: CalendarEvent[];
@@ -35,6 +21,9 @@ interface ChatViewProps {
     onUpdateSettings?: (settings: AppSettings) => void;
     agent?: AIAgent;
     onUserMessage?: (text: string) => void;
+    initialMessages?: ChatMessage[];
+    onUpdateMessages?: (sessionId: string, messages: ChatMessage[]) => void;
+    currentSessionId?: string | null;
 }
 
 // Helper: Get time-based greeting
@@ -86,6 +75,9 @@ const ChatView: React.FC<ChatViewProps> = ({
     onUpdateSettings,
     agent,
     onUserMessage,
+    initialMessages,
+    onUpdateMessages,
+    currentSessionId,
 }) => {
     const activeGeminiConfig = getActiveGeminiConfig(settings);
 
@@ -100,7 +92,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 id: 'onboarding-1',
                 role: 'assistant',
                 content: `${getTimeBasedGreeting()}\n\n처음 오셨네요! 저는 ${agent?.name || 'LifeSync AI'}예요. ${agent?.emoji || '💬'}\n당신의 일상을 함께 정리하고 더 나은 하루를 만들어 드릴게요.\n\n먼저, 뭐라고 불러드리면 될까요?`,
-                timestamp: new Date(),
+                timestamp: new Date().toISOString(),
                 action: { type: 'onboarding' },
             };
         }
@@ -110,12 +102,15 @@ const ChatView: React.FC<ChatViewProps> = ({
             id: 'welcome',
             role: 'assistant',
             content: `${userName}님, ${getTimeBasedGreeting()}\n\n${getTodaySummary(events, todos)}\n\n무엇을 도와드릴까요?`,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
             quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록', '주간 분석해줘'],
         };
     };
 
-    const [messages, setMessages] = useState<ChatMessage[]>(() => [getWelcomeMessage()]);
+    const [messages, setMessages] = useState<ChatMessage[]>(() => {
+        if (initialMessages && initialMessages.length > 0) return initialMessages;
+        return [getWelcomeMessage()];
+    });
     const [inputValue, setInputValue] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [conversationContext, setConversationContext] = useState<string[]>([]); // For context awareness
@@ -129,6 +124,28 @@ const ChatView: React.FC<ChatViewProps> = ({
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    // Update messages when switching sessions
+    useEffect(() => {
+        if (currentSessionId) {
+            if (initialMessages && initialMessages.length > 0) {
+                setMessages(initialMessages);
+            } else {
+                // Keep current welcome message if new session is empty
+                setMessages(prev => prev.length === 0 ? [getWelcomeMessage()] : prev);
+            }
+        } else {
+            // No session - reset to welcome
+            setMessages([getWelcomeMessage()]);
+        }
+    }, [currentSessionId]);
+
+    // Notify parent of message updates
+    useEffect(() => {
+        if (currentSessionId && onUpdateMessages && messages.length > 1) {
+            onUpdateMessages(currentSessionId, messages);
+        }
+    }, [messages, currentSessionId]);
 
     // Save username to localStorage
     useEffect(() => {
@@ -300,7 +317,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                         id: crypto.randomUUID(),
                         role: 'assistant',
                         content: activeGeminiConfig?.apiKey ? 'AI 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 😢' : 'AI 분석을 하려면 먼저 **설정 > API 연결 설정**에서 Gemini API와 모델을 선택해주세요! 🔑',
-                        timestamp: new Date(),
+                        timestamp: new Date().toISOString(),
                         quickReplies: ['설정하러 갈래', '괜찮아']
                     };
                     setMessages(prev => [...prev, errorMessage]);
@@ -441,7 +458,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             id: crypto.randomUUID(),
             role: 'user',
             content: messageText,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
         };
 
         setMessages((prev) => [...prev, userMessage]);
@@ -461,7 +478,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                     id: crypto.randomUUID(),
                     role: 'assistant',
                     content: '알겠어요. 요청은 취소했어요.',
-                    timestamp: new Date(),
+                    timestamp: new Date().toISOString(),
                     quickReplies: ['다른 요청 하기', '오늘 일정 알려줘', '할 일 추가'],
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
@@ -475,7 +492,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 content: confirmedResponse.content,
-                timestamp: new Date(),
+                timestamp: new Date().toISOString(),
                 action: { ...pendingAction, executed: true },
                 quickReplies: confirmedResponse.quickReplies,
             };
@@ -498,7 +515,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 content: prompt.content,
-                timestamp: new Date(),
+                timestamp: new Date().toISOString(),
                 action,
                 quickReplies: prompt.quickReplies,
             };
@@ -514,7 +531,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 content: response.content,
-                timestamp: new Date(),
+                timestamp: new Date().toISOString(),
                 action: { ...action, executed: true }, // executed flag
                 quickReplies: response.quickReplies,
             };
@@ -544,7 +561,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                         id: crypto.randomUUID(),
                         role: 'assistant',
                         content: reply,
-                        timestamp: new Date(),
+                        timestamp: new Date().toISOString(),
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
 
@@ -554,7 +571,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                         id: crypto.randomUUID(),
                         role: 'assistant',
                         content: "죄송해요, 대화 중 오류가 발생했어요. 다시 말씀해 주시겠어요?",
-                        timestamp: new Date(),
+                        timestamp: new Date().toISOString(),
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                 }
@@ -565,7 +582,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                     id: crypto.randomUUID(),
                     role: 'assistant',
                     content: response.content,
-                    timestamp: new Date(),
+                    timestamp: new Date().toISOString(),
                     quickReplies: response.quickReplies,
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
@@ -582,11 +599,11 @@ const ChatView: React.FC<ChatViewProps> = ({
         <div className="max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans">
 
 
-            <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6">
+            <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6 scrollbar-hide">
                 {messages.map((msg, index) => (
                     <div key={msg.id} className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
                         {msg.role === 'assistant' && (
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
                                 {agent?.avatar ? (
                                     <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
                                 ) : (
@@ -633,7 +650,7 @@ const ChatView: React.FC<ChatViewProps> = ({
 
                 {isProcessing && (
                     <div className="flex w-full mb-6 justify-start items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
                             {agent?.avatar ? (
                                 <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
                             ) : (

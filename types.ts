@@ -137,6 +137,27 @@ export interface ApiUsageStats {
   lastRequestDate?: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string; // ISO string
+  action?: {
+    type: 'add_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
+    data?: any;
+    executed?: boolean;
+  };
+  quickReplies?: string[];
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  lastMessageAt: string;
+}
+
 export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings' | 'personas';
 
 export interface TriggerContext {

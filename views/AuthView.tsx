@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { Sparkles, Mail, Lock, User, ArrowRight, Github, Loader2 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 
@@ -79,6 +79,13 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, initialMode = 'login' }) =
                         ]);
 
                     if (profileError) console.error('Profile creation error:', profileError);
+
+                    if (!data.session) {
+                        setIsLogin(true);
+                        setPassword('');
+                        setError('회원가입이 완료되었습니다. 이메일 인증 후 로그인해주세요.');
+                        return;
+                    }
 
                     const userData = {
                         id: data.user.id,
@@ -237,8 +244,13 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, initialMode = 'login' }) =
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <button className="flex items-center justify-center gap-2 py-2.5 border border-[#e9e9e8] rounded-xl hover:bg-[#f7f7f5] transition-all text-xs font-semibold text-[#37352f]">
-                            <Github size={16} /> GitHub
+                        <button
+                            type="button"
+                            disabled
+                            title="GitHub 로그인은 준비 중입니다."
+                            className="flex items-center justify-center gap-2 py-2.5 border border-[#e9e9e8] rounded-xl text-xs font-semibold text-[#9b9a97] bg-[#f7f7f5] cursor-not-allowed"
+                        >
+                            <Github size={16} /> GitHub 준비 중
                         </button>
                         <button
                             type="button"
@@ -253,8 +265,8 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, initialMode = 'login' }) =
 
                 {/* Footer */}
                 <p className="text-center text-xs text-[#9b9a97] font-medium">
-                    계속 진행함으로써 LifeSync AI의 <span className="underline cursor-pointer">서비스 이용약관</span> 및 <br />
-                    <span className="underline cursor-pointer">개인정보 처리방침</span>에 동의하게 됩니다.
+                    계속 진행함으로써 LifeSync AI의 서비스 이용약관 및 <br />
+                    개인정보 처리방침에 동의하게 됩니다.
                 </p>
             </div>
         </div>

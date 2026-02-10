@@ -1,316 +1,306 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AIAgent, AppSettings } from '../types';
+import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X } from 'lucide-react';
 
-// Default AI Agents Configuration - 3명으로 축소
-const DEFAULT_AGENTS: AIAgent[] = [
-    {
-        id: 'ARIA',
-        name: '아리아',
-        emoji: '🧮',
-        role: '분석가',
-        personality: '데이터와 패턴을 기반으로 객관적이고 논리적인 분석을 제공합니다. 숫자와 트렌드를 좋아하며, 사용자의 행동에서 의미 있는 인사이트를 발견합니다.',
-        tone: '침착하고 분석적인 톤. 구체적인 수치와 비교를 자주 언급합니다.',
-        color: '#37352f',
-    },
+export const DEFAULT_AGENTS: AIAgent[] = [
+  {
+    id: 'ARIA',
+    name: 'LifeSync AI',
+    emoji: '🤖',
+    role: 'Personal Assistant',
+    personality: 'Friendly, helpful, and organized',
+    tone: 'Professional yet approachable',
+    color: '#4F46E5',
+    avatar: 'https://ui-avatars.com/api/?name=LifeSync+AI&background=4F46E5&color=fff',
+  },
+  {
+    id: 'COACH',
+    name: 'Productivity Coach',
+    emoji: '🚀',
+    role: 'Coach',
+    personality: 'Motivating, direct, and results-oriented',
+    tone: 'Energetic and encouraging',
+    color: '#10B981',
+    avatar: 'https://ui-avatars.com/api/?name=Productivity+Coach&background=10B981&color=fff',
+  },
+  {
+    id: 'EMPATH',
+    name: 'Mindfulness Guide',
+    emoji: '🌿',
+    role: 'Therapist',
+    personality: 'Empathetic, calm, and a good listener',
+    tone: 'Soothing and supportive',
+    color: '#F59E0B',
+    avatar: 'https://ui-avatars.com/api/?name=Mindfulness+Guide&background=F59E0B&color=fff',
+  },
 ];
 
 interface PersonaSettingsViewProps {
-    agents: AIAgent[];
-    onUpdateAgents: (agents: AIAgent[]) => void;
-    settings: AppSettings;
-    onUpdateSettings: (settings: AppSettings) => void;
-    onExportData: () => void;
-    onClearAllData: () => void;
-    onClearActivity: () => void;
+  agents: AIAgent[];
+  onUpdateAgents: (agents: AIAgent[]) => void;
+  settings: AppSettings;
+  onUpdateSettings: (settings: AppSettings) => void;
+  onExportData: () => void;
+  onClearAllData: () => void;
+  onClearActivity: () => void;
 }
 
 const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
-    agents,
-    onUpdateAgents,
-    settings,
-    onUpdateSettings,
-    onExportData,
-    onClearAllData,
-    onClearActivity,
+  agents,
+  onUpdateAgents,
+  settings,
+  onUpdateSettings,
+  onExportData,
+  onClearAllData,
+  onClearActivity,
 }) => {
-    const [localAgents, setLocalAgents] = useState<AIAgent[]>(agents);
-    const [editingAgent, setEditingAgent] = useState<AIAgent | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AIAgent | null>(null);
 
-    useEffect(() => {
-        setLocalAgents(agents);
-    }, [agents]);
+  const editingTarget = useMemo(
+    () => agents.find((agent) => agent.id === editingId) || null,
+    [agents, editingId]
+  );
 
-    const handleSaveAgent = (updatedAgent: AIAgent) => {
-        const newAgents = localAgents.map(a => a.id === updatedAgent.id ? updatedAgent : a);
-        setLocalAgents(newAgents);
-        onUpdateAgents(newAgents);
-        setEditingAgent(null);
-    };
+  const openEditor = (agent: AIAgent) => {
+    setEditingId(agent.id);
+    setDraft({ ...agent });
+  };
 
-    const handleResetToDefault = () => {
-        setLocalAgents(DEFAULT_AGENTS);
-        onUpdateAgents(DEFAULT_AGENTS);
-    };
+  const closeEditor = () => {
+    setEditingId(null);
+    setDraft(null);
+  };
 
-    return (
-        <div className="max-w-[900px] mx-auto text-[#37352f] px-2 font-sans">
-            {/* Header */}
-            <div className="flex justify-between items-start mb-8 pt-4">
-                <div>
-                    <h1 className="text-4xl font-bold mb-3 tracking-tight flex items-center gap-3">
-                        AI 페르소나 설정
-                    </h1>
-                    <p className="text-[#9b9a97] text-lg font-medium">각 AI의 성격과 말투를 커스터마이징하세요.</p>
-                </div>
-                <button
-                    onClick={handleResetToDefault}
-                    className="px-4 py-2 text-sm text-[#9b9a97] hover:text-[#37352f] border border-[#e9e9e8] rounded-lg hover:bg-[#f7f7f5] transition-colors"
-                >
-                    기본값으로 초기화
-                </button>
-            </div>
-
-            {/* Agent Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {localAgents.map(agent => (
-                    <div
-                        key={agent.id}
-                        className="bg-white border border-[#e9e9e8] rounded-xl p-6 hover:shadow-lg transition-all cursor-pointer group"
-                        onClick={() => setEditingAgent(agent)}
-                    >
-                        <div className="flex items-start gap-4 mb-4">
-                            <div
-                                className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm overflow-hidden"
-                                style={{ backgroundColor: agent.color + '20', border: `2px solid ${agent.color}` }}
-                            >
-                                {agent.avatar ? (
-                                    <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
-                                ) : (
-                                    agent.emoji
-                                )}
-                            </div>
-                            <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xl font-bold" style={{ color: agent.color }}>{agent.name}</span>
-                                    <span className="text-xs px-2 py-0.5 rounded-full bg-[#f7f7f5] text-[#9b9a97]">{agent.role}</span>
-                                </div>
-                                <p className="text-sm text-[#787774] mt-2 line-clamp-2">{agent.personality}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs text-[#d3d1cb]">클릭하여 수정</span>
-                            <div
-                                className="w-6 h-6 rounded-full opacity-60 group-hover:opacity-100 transition-opacity"
-                                style={{ backgroundColor: agent.color }}
-                            />
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Description Section */}
-            <div className="mt-12 bg-[#fbfbfa] border border-[#e9e9e8] rounded-xl p-6">
-                <h3 className="font-bold mb-4">페르소나란?</h3>
-                <p className="text-sm text-[#787774] leading-relaxed mb-4">
-                    각 AI 에이전트는 고유한 성격과 역할을 가지고 있습니다.
-                    당신이 캘린더에 일정을 추가하거나, 할 일을 완료하거나, 일기를 쓸 때마다
-                    이 AI들이 <strong>"AI 커뮤니티"</strong> 보드에서 자동으로 대화를 나눕니다.
-                </p>
-                <p className="text-sm text-[#787774] leading-relaxed">
-                    원하는 대로 각 AI의 성격을 수정하면, 더 개인화된 경험을 만들 수 있어요.
-                    예를 들어, 응원단장 <strong>모모</strong>가 너무 시끄럽다면 조용한 성격으로 바꿔보세요!
-                </p>
-            </div>
-
-
-
-            {/* App Settings */}
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white border border-[#e9e9e8] rounded-xl p-6">
-                    <h3 className="font-bold mb-4">자동 반응 설정</h3>
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <p className="text-sm font-semibold text-[#37352f]">AI 자동 반응</p>
-                            <p className="text-xs text-[#9b9a97]">할 일/일정/일기 기록 시 AI 커뮤니티가 자동으로 반응합니다.</p>
-                        </div>
-                        <button
-                            onClick={() => onUpdateSettings({ ...settings, autoAiReactions: !settings.autoAiReactions })}
-                            className={`w-12 h-6 rounded-full transition-colors ${settings.autoAiReactions ? 'bg-[#37352f]' : 'bg-[#d3d1cb]'}`}
-                        >
-                            <span
-                                className={`block w-5 h-5 bg-white rounded-full transition-transform ${settings.autoAiReactions ? 'translate-x-6' : 'translate-x-1'}`}
-                            />
-                        </button>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-semibold text-[#37352f]">채팅 실행 전 확인</p>
-                            <p className="text-xs text-[#9b9a97]">AI 채팅에서 일정/할 일/일기를 만들기 전에 확인을 거칩니다.</p>
-                        </div>
-                        <button
-                            onClick={() => onUpdateSettings({ ...settings, chatActionConfirm: !settings.chatActionConfirm })}
-                            className={`w-12 h-6 rounded-full transition-colors ${settings.chatActionConfirm ? 'bg-[#37352f]' : 'bg-[#d3d1cb]'}`}
-                        >
-                            <span
-                                className={`block w-5 h-5 bg-white rounded-full transition-transform ${settings.chatActionConfirm ? 'translate-x-6' : 'translate-x-1'}`}
-                            />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="bg-white border border-[#e9e9e8] rounded-xl p-6">
-                    <h3 className="font-bold mb-4">데이터 관리</h3>
-                    <div className="space-y-3">
-                        <button
-                            onClick={onExportData}
-                            className="w-full px-4 py-2 text-sm text-[#37352f] border border-[#e9e9e8] rounded-lg hover:bg-[#f7f7f5] transition-colors"
-                        >
-                            데이터 내보내기 (JSON)
-                        </button>
-                        <button
-                            onClick={onClearActivity}
-                            className="w-full px-4 py-2 text-sm text-[#9b9a97] border border-[#e9e9e8] rounded-lg hover:bg-[#f7f7f5] transition-colors"
-                        >
-                            활동 기록 지우기
-                        </button>
-                        <button
-                            onClick={onClearAllData}
-                            className="w-full px-4 py-2 text-sm text-white bg-[#eb5757] rounded-lg hover:bg-[#d64545] transition-colors"
-                        >
-                            모든 기록 삭제
-                        </button>
-                    </div>
-                    <p className="text-xs text-[#9b9a97] mt-3">
-                        삭제 항목: 일정/할 일/일기/AI 보드/활동 기록 (페르소나 설정은 유지)
-                    </p>
-                </div>
-            </div>
-
-            {/* Agent Edit Modal */}
-            {editingAgent && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-[#e9e9e8]" style={{ backgroundColor: editingAgent.color + '10' }}>
-                            <div className="flex items-center gap-4">
-                                <div
-                                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl overflow-hidden"
-                                    style={{ backgroundColor: 'white', border: `3px solid ${editingAgent.color}` }}
-                                >
-                                    {editingAgent.avatar ? (
-                                        <img src={editingAgent.avatar} alt={editingAgent.name} className="w-full h-full object-cover" />
-                                    ) : (
-                                        editingAgent.emoji
-                                    )}
-                                </div>
-                                <div>
-                                    <h3 className="text-2xl font-bold" style={{ color: editingAgent.color }}>{editingAgent.name}</h3>
-                                    <p className="text-[#9b9a97]">{editingAgent.role}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="p-6 space-y-5">
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">이름</label>
-                                <input
-                                    type="text"
-                                    value={editingAgent.name}
-                                    onChange={(e) => setEditingAgent({ ...editingAgent, name: e.target.value })}
-                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">역할</label>
-                                <input
-                                    type="text"
-                                    value={editingAgent.role}
-                                    onChange={(e) => setEditingAgent({ ...editingAgent, role: e.target.value })}
-                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">성격 설명</label>
-                                <textarea
-                                    value={editingAgent.personality}
-                                    onChange={(e) => setEditingAgent({ ...editingAgent, personality: e.target.value })}
-                                    rows={3}
-                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10 resize-none"
-                                    placeholder="이 AI의 성격을 설명해주세요..."
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">말투 스타일</label>
-                                <textarea
-                                    value={editingAgent.tone}
-                                    onChange={(e) => setEditingAgent({ ...editingAgent, tone: e.target.value })}
-                                    rows={2}
-                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10 resize-none"
-                                    placeholder="어떤 톤으로 말할지 설명해주세요..."
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">프로필 이미지</label>
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            if (file) {
-                                                const reader = new FileReader();
-                                                reader.onloadend = () => {
-                                                    setEditingAgent({ ...editingAgent, avatar: reader.result as string });
-                                                };
-                                                reader.readAsDataURL(file);
-                                            }
-                                        }}
-                                        className="w-full text-sm text-[#787774] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[#f7f7f5] file:text-[#37352f] hover:file:bg-[#efefef]"
-                                    />
-                                    {editingAgent.avatar && (
-                                        <button
-                                            onClick={() => setEditingAgent({ ...editingAgent, avatar: undefined })}
-                                            className="text-xs text-[#eb5757] hover:underline whitespace-nowrap"
-                                        >
-                                            삭제
-                                        </button>
-                                    )}
-                                </div>
-                                <p className="text-xs text-[#9b9a97] mt-1">컴퓨터에 있는 이미지를 선택하세요.</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-3">테마 색상</label>
-                                <div className="flex gap-3 flex-wrap">
-                                    {['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#84cc16', '#f97316'].map(color => (
-                                        <button
-                                            key={color}
-                                            onClick={() => setEditingAgent({ ...editingAgent, color })}
-                                            className={`w-10 h-10 rounded-xl transition-all ${editingAgent.color === color ? 'ring-2 ring-offset-2 ring-[#37352f] scale-110' : 'hover:scale-105'}`}
-                                            style={{ backgroundColor: color }}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="p-6 border-t border-[#e9e9e8] flex gap-3 justify-end bg-[#fbfbfa]">
-                            <button
-                                onClick={() => setEditingAgent(null)}
-                                className="px-5 py-2.5 text-[#9b9a97] hover:text-[#37352f] transition-colors font-medium"
-                            >
-                                취소
-                            </button>
-                            <button
-                                onClick={() => handleSaveAgent(editingAgent)}
-                                className="px-6 py-2.5 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] transition-colors font-medium shadow-sm"
-                            >
-                                저장하기
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+  const saveAgent = () => {
+    if (!editingId || !draft) return;
+    onUpdateAgents(
+      agents.map((agent) => (agent.id === editingId ? { ...agent, ...draft } : agent))
     );
+    closeEditor();
+  };
+
+  const addCustomAgent = () => {
+    const newAgent: AIAgent = {
+      id: crypto.randomUUID(),
+      name: 'New Agent',
+      emoji: '✨',
+      role: 'Custom Role',
+      personality: 'Describe this agent personality',
+      tone: 'Friendly',
+      color: '#6366f1',
+      avatar: '',
+    };
+    onUpdateAgents([...agents, newAgent]);
+    openEditor(newAgent);
+  };
+
+  const removeAgent = (id: string) => {
+    if (!window.confirm('이 페르소나를 삭제할까요?')) return;
+    onUpdateAgents(agents.filter((agent) => agent.id !== id));
+  };
+
+  const resetAgents = () => {
+    if (!window.confirm('기본 페르소나로 초기화할까요?')) return;
+    onUpdateAgents(DEFAULT_AGENTS);
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-8 pb-12 px-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-normal text-[#37352f]">페르소나 설정</h2>
+          <p className="text-sm text-[#787774] mt-1">AI 페르소나를 편집하고 행동 옵션을 조정하세요.</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={addCustomAgent}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-white text-sm hover:bg-[#2b2924] transition-colors"
+          >
+            <Plus size={14} /> 추가
+          </button>
+          <button
+            onClick={resetAgents}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-[#37352f] text-sm hover:bg-[#f7f7f5] transition-colors"
+          >
+            <RotateCcw size={14} /> 기본값
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {agents.map((agent) => (
+          <div key={agent.id} className="bg-white border border-[#e9e9e8] rounded-xl p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-lg text-white"
+                  style={{ backgroundColor: agent.color || '#37352f' }}
+                >
+                  {agent.avatar ? (
+                    <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{agent.emoji || '🤖'}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm text-[#37352f] truncate">{agent.name}</div>
+                  <div className="text-xs text-[#9b9a97] truncate">{agent.role}</div>
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => openEditor(agent)}
+                  className="p-1.5 rounded-md hover:bg-[#f2f2f0] text-[#787774]"
+                  title="편집"
+                >
+                  <Edit3 size={14} />
+                </button>
+                <button
+                  onClick={() => removeAgent(agent.id)}
+                  className="p-1.5 rounded-md hover:bg-[#fff0f0] text-[#cf3f3f]"
+                  title="삭제"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-[#787774] mt-3 line-clamp-2">{agent.personality}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-4">
+        <h3 className="text-lg text-[#37352f]">동작 옵션</h3>
+        <label className="flex items-center justify-between py-2">
+          <div>
+            <div className="text-sm text-[#37352f]">AI 자동 반응</div>
+            <div className="text-xs text-[#9b9a97]">일기/할 일/일정 이벤트에 AI 반응을 생성합니다.</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.autoAiReactions}
+            onChange={(e) => onUpdateSettings({ ...settings, autoAiReactions: e.target.checked })}
+            className="w-4 h-4 accent-[#37352f]"
+          />
+        </label>
+        <label className="flex items-center justify-between py-2">
+          <div>
+            <div className="text-sm text-[#37352f]">채팅 실행 전 확인</div>
+            <div className="text-xs text-[#9b9a97]">채팅에서 일정/할 일 생성 전에 확인 단계를 보여줍니다.</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.chatActionConfirm}
+            onChange={(e) => onUpdateSettings({ ...settings, chatActionConfirm: e.target.checked })}
+            className="w-4 h-4 accent-[#37352f]"
+          />
+        </label>
+      </div>
+
+      <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-3">
+        <h3 className="text-lg text-[#37352f]">데이터 관리</h3>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onExportData}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
+          >
+            <Download size={14} /> 내보내기
+          </button>
+          <button
+            onClick={onClearActivity}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
+          >
+            <Trash size={14} /> 활동 로그 삭제
+          </button>
+          <button
+            onClick={onClearAllData}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#d94848] text-sm text-white hover:bg-[#c33f3f]"
+          >
+            <Trash2 size={14} /> 전체 데이터 초기화
+          </button>
+        </div>
+      </div>
+
+      {editingId && draft && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white rounded-2xl border border-[#e9e9e8] shadow-xl">
+            <div className="px-5 py-4 border-b border-[#efefef] flex items-center justify-between">
+              <h4 className="text-[#37352f]">{editingTarget ? '페르소나 편집' : '새 페르소나'}</h4>
+              <button onClick={closeEditor} className="p-1 rounded-md hover:bg-[#f2f2f0] text-[#787774]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-xs text-[#787774]">
+                이름
+                <input
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                />
+              </label>
+              <label className="text-xs text-[#787774]">
+                이모지
+                <input
+                  value={draft.emoji}
+                  onChange={(e) => setDraft({ ...draft, emoji: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                />
+              </label>
+              <label className="text-xs text-[#787774]">
+                역할
+                <input
+                  value={draft.role}
+                  onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                />
+              </label>
+              <label className="text-xs text-[#787774]">
+                톤
+                <input
+                  value={draft.tone}
+                  onChange={(e) => setDraft({ ...draft, tone: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                />
+              </label>
+              <label className="text-xs text-[#787774] md:col-span-2">
+                성격
+                <textarea
+                  value={draft.personality}
+                  onChange={(e) => setDraft({ ...draft, personality: e.target.value })}
+                  rows={3}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f] resize-none"
+                />
+              </label>
+              <label className="text-xs text-[#787774] md:col-span-2">
+                아바타 URL
+                <input
+                  value={draft.avatar || ''}
+                  onChange={(e) => setDraft({ ...draft, avatar: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                />
+              </label>
+            </div>
+            <div className="px-5 py-4 border-t border-[#efefef] flex justify-end gap-2">
+              <button
+                onClick={closeEditor}
+                className="px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
+              >
+                취소
+              </button>
+              <button
+                onClick={saveAgent}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-sm text-white hover:bg-[#2b2924]"
+              >
+                <Save size={14} /> 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
-export { DEFAULT_AGENTS };
 export default PersonaSettingsView;

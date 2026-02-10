@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Sparkles, BookOpen, MessageCircle, CheckSquare, Calendar, ArrowRight, Zap, Shield, Heart } from 'lucide-react';
 
 interface LandingViewProps {
@@ -16,18 +16,18 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                         <div className="w-10 h-10 bg-[#37352f] text-white rounded-[14px] flex items-center justify-center transition-transform group-hover:rotate-6">
                             <Sparkles size={20} />
                         </div>
-                        <span className="text-xl font-bold tracking-tight">LifeSync AI</span>
+                        <span className="text-xl font-normal tracking-tight">LifeSync AI</span>
                     </div>
                     <div className="flex items-center gap-8">
                         <button
                             onClick={onLogin}
-                            className="text-sm font-semibold text-[#787774] hover:text-[#37352f] transition-colors"
+                            className="text-sm font-normal text-[#787774] hover:text-[#37352f] transition-colors"
                         >
                             로그인
                         </button>
                         <button
                             onClick={onGetStarted}
-                            className="px-6 py-2.5 bg-[#37352f] text-white text-sm font-bold rounded-full hover:bg-black transition-all shadow-md active:scale-95"
+                            className="px-6 py-2.5 bg-[#37352f] text-white text-sm font-normal rounded-full hover:bg-black transition-all shadow-md active:scale-95"
                         >
                             시작하기
                         </button>
@@ -40,29 +40,29 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                 <section className="relative pt-48 pb-32 overflow-hidden">
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full -z-10 bg-[radial-gradient(circle_at_center,rgba(120,119,198,0.05)_0,transparent_50%)]"></div>
                     <div className="max-w-7xl mx-auto px-6 text-center space-y-12">
-                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#f1f1f0] rounded-full text-xs font-bold text-[#37352f] mb-4 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#f1f1f0] rounded-full text-xs font-normal text-[#37352f] mb-4 animate-in fade-in slide-in-from-bottom-2 duration-700">
                             <Zap size={14} className="text-amber-500" />
                             <span>당신을 가장 잘 이해하는 AI 비서</span>
                         </div>
-                        <h1 className="text-[64px] lg:text-[84px] font-bold tracking-tighter leading-[1.05] text-[#1a1a1a] max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+                        <h1 className="text-[64px] lg:text-[84px] font-normal tracking-tighter leading-[1.05] text-[#1a1a1a] max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
                             기억하지 말고, <br />
                             <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">연결하세요.</span>
                         </h1>
-                        <p className="text-xl lg:text-2xl text-[#787774] max-w-2xl mx-auto font-medium animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+                        <p className="text-xl lg:text-2xl text-[#787774] max-w-2xl mx-auto font-normal animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
                             LifeSync AI는 단순한 노트를 넘어, 당신의 일정과 메모를 <br className="hidden lg:block" />
                             분석하고 AI 동료들과 소통하는 새로운 경험을 제공합니다.
                         </p>
                         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
                             <button
                                 onClick={onGetStarted}
-                                className="w-full sm:w-auto px-10 py-5 bg-[#37352f] text-white text-lg font-bold rounded-[22px] hover:bg-black transition-all shadow-2xl flex items-center justify-center gap-3 group"
+                                className="w-full sm:w-auto px-10 py-5 bg-[#37352f] text-white text-lg font-normal rounded-[22px] hover:bg-black transition-all shadow-2xl flex items-center justify-center gap-3 group"
                             >
                                 무료로 시작하기
                                 <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                             </button>
                             <button
                                 onClick={onLogin}
-                                className="w-full sm:w-auto px-10 py-5 bg-white border border-[#e9e9e8] text-[#37352f] text-lg font-bold rounded-[22px] hover:bg-[#f7f7f5] transition-all"
+                                className="w-full sm:w-auto px-10 py-5 bg-white border border-[#e9e9e8] text-[#37352f] text-lg font-normal rounded-[22px] hover:bg-[#f7f7f5] transition-all"
                             >
                                 이미 계정이 있나요?
                             </button>
@@ -117,7 +117,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                             <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center text-[#37352f] border border-[#e9e9e8] group-hover:scale-110 transition-transform">
                                 <BookOpen size={24} />
                             </div>
-                            <h3 className="text-2xl font-bold tracking-tight">지능형 일기장</h3>
+                            <h3 className="text-2xl font-normal tracking-tight">지능형 일기장</h3>
                             <p className="text-[#787774] leading-relaxed">
                                 당신의 하루를 기록하면 AI 페르소나들이 각자의 관점으로 반응을 남깁니다. 단순한 기록이 대화가 되는 순간을 경험하세요.
                             </p>
@@ -126,7 +126,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                             <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center text-[#37352f] border border-[#e9e9e8] group-hover:scale-110 transition-transform">
                                 <CheckSquare size={24} />
                             </div>
-                            <h3 className="text-2xl font-bold tracking-tight">유연한 할 일 관리</h3>
+                            <h3 className="text-2xl font-normal tracking-tight">유연한 할 일 관리</h3>
                             <p className="text-[#787774] leading-relaxed">
                                 생산성을 위해 설계된 직관적인 투두 리스트. 드래그 앤 드롭으로 우선순위를 정하고 AI의 최적화된 습관 조언을 받아보세요.
                             </p>
@@ -135,7 +135,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                             <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center text-[#37352f] border border-[#e9e9e8] group-hover:scale-110 transition-transform">
                                 <Calendar size={24} />
                             </div>
-                            <h3 className="text-2xl font-bold tracking-tight">라이프 싱크 캘린더</h3>
+                            <h3 className="text-2xl font-normal tracking-tight">라이프 싱크 캘린더</h3>
                             <p className="text-[#787774] leading-relaxed">
                                 모든 일정과 일기, 할 일이 하나의 타임라인에서 만납니다. 과거를 회상하고 미래를 계획하는 가장 완벽한 방법입니다.
                             </p>
@@ -148,7 +148,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                     <div className="max-w-5xl mx-auto px-6 bg-[#37352f] rounded-[48px] p-16 lg:p-24 text-center space-y-10 relative overflow-hidden shadow-2xl">
                         <div className="absolute -top-24 -left-24 w-64 h-64 bg-purple-500/20 blur-[100px]"></div>
                         <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-indigo-500/20 blur-[100px]"></div>
-                        <h2 className="text-[44px] lg:text-[64px] font-bold tracking-tighter text-white leading-[1.1]">
+                        <h2 className="text-[44px] lg:text-[64px] font-normal tracking-tighter text-white leading-[1.1]">
                             지금 바로 당신의 기록을 <br />
                             동기화 하세요.
                         </h2>
@@ -159,7 +159,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                         <div className="pt-8">
                             <button
                                 onClick={onGetStarted}
-                                className="px-10 py-5 bg-white text-[#37352f] text-lg font-bold rounded-[22px] hover:bg-[#f7f7f5] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3 mx-auto"
+                                className="px-10 py-5 bg-white text-[#37352f] text-lg font-normal rounded-[22px] hover:bg-[#f7f7f5] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3 mx-auto"
                             >
                                 무료 시작하기
                                 <ArrowRight size={20} />
@@ -175,15 +175,15 @@ const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onLogin }) => {
                         <div className="w-8 h-8 bg-[#37352f] text-white rounded-[10px] flex items-center justify-center">
                             <Sparkles size={16} />
                         </div>
-                        <span className="text-lg font-bold tracking-tight">LifeSync AI</span>
+                        <span className="text-lg font-normal tracking-tight">LifeSync AI</span>
                     </div>
-                    <div className="flex gap-12 text-sm font-semibold text-[#9b9a97]">
+                    <div className="flex gap-12 text-sm font-normal text-[#9b9a97]">
                         <span className="hover:text-[#37352f] cursor-pointer">기능 소개</span>
                         <span className="hover:text-[#37352f] cursor-pointer">요금제</span>
                         <span className="hover:text-[#37352f] cursor-pointer">개인정보보호</span>
                         <span className="hover:text-[#37352f] cursor-pointer">고객지원</span>
                     </div>
-                    <p className="text-xs font-medium text-[#9b9a97]">© 2026 LifeSync AI. All rights reserved.</p>
+                    <p className="text-xs font-normal text-[#9b9a97]">© 2026 LifeSync AI. All rights reserved.</p>
                 </div>
             </footer>
         </div>
