@@ -53,6 +53,20 @@ const appendChatObservation = (text: string) => {
   saveToStorage(CHAT_OBSERVATIONS_KEY, next);
 };
 
+const inferAgentIdFromMessages = (messages: ChatMessage[], agents: AIAgent[]): string | undefined => {
+  if (!messages?.length || !agents?.length) return undefined;
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, '').trim();
+  const assistantMessages = messages.filter(m => m.role === 'assistant');
+
+  for (const message of assistantMessages) {
+    const content = normalize(message.content || '');
+    if (!content) continue;
+    const matchedAgent = agents.find(agent => content.includes(normalize(agent.name)));
+    if (matchedAgent) return matchedAgent.id;
+  }
+  return undefined;
+};
+
 const normalizeCommunityPost = (post: any): CommunityPost => ({
   id: post.id,
   author: post.author,
@@ -277,6 +291,19 @@ const App: React.FC = () => {
   }, [chatSessions]);
   useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
   useEffect(() => saveToStorage('ls_active_chat_agent', activeChatAgentId), [activeChatAgentId]);
+  useEffect(() => {
+    setChatSessions(prev => {
+      let changed = false;
+      const next = prev.map(session => {
+        if (session.agentId) return session;
+        const inferredAgentId = inferAgentIdFromMessages(session.messages, aiAgents);
+        if (!inferredAgentId) return session;
+        changed = true;
+        return { ...session, agentId: inferredAgentId };
+      });
+      return changed ? next : prev;
+    });
+  }, [aiAgents]);
   useEffect(() => {
     if (!activeChatSessionId) return;
     const activeSession = chatSessions.find(session => session.id === activeChatSessionId);
@@ -1642,9 +1669,11 @@ const App: React.FC = () => {
                         <div key={session.id} className="group relative">
                           <button
                             onClick={() => {
+                              const inferredAgentId = session.agentId || inferAgentIdFromMessages(session.messages, aiAgents) || activeChatAgentId;
                               setActiveChatSessionId(session.id);
-                              if (session.agentId) {
-                                setActiveChatAgentId(session.agentId);
+                              setActiveChatAgentId(inferredAgentId);
+                              if (!session.agentId) {
+                                setChatSessions(prev => prev.map(s => s.id === session.id ? { ...s, agentId: inferredAgentId } : s));
                               }
                             }}
                             className={`w-full text-left px-3 py-1.5 rounded-[4px] transition-colors text-sm group ${activeChatSessionId === session.id
@@ -2148,9 +2177,11 @@ const App: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => {
+                              const inferredAgentId = session.agentId || inferAgentIdFromMessages(session.messages, aiAgents) || activeChatAgentId;
                               setActiveChatSessionId(session.id);
-                              if (session.agentId) {
-                                setActiveChatAgentId(session.agentId);
+                              setActiveChatAgentId(inferredAgentId);
+                              if (!session.agentId) {
+                                setChatSessions(prev => prev.map(s => s.id === session.id ? { ...s, agentId: inferredAgentId } : s));
                               }
                               setCurrentView('chat');
                               setIsMobileMenuOpen(false);
