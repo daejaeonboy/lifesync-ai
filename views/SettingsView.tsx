@@ -146,7 +146,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     ];
 
     return (
-        <div className="max-w-[900px] mx-auto px-2 pb-20 font-sans">
+        <div className="max-w-[900px] w-full mx-auto px-2 pb-20 font-sans overflow-x-hidden">
             {/* Header */}
             <div className="pt-4 mb-6">
                 <h1 className="text-2xl font-normal text-[#37352f] tracking-tight">설정</h1>
@@ -154,19 +154,21 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex gap-1 mb-6 bg-[#f7f7f5] p-1 rounded-lg w-fit">
-                {tabs.map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === tab.id
-                                ? 'bg-white text-[#37352f] shadow-sm'
-                                : 'text-[#9b9a97] hover:text-[#37352f]'
-                            }`}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
+            <div className="mb-6 overflow-x-auto scrollbar-hide">
+                <div className="inline-flex min-w-max gap-1 bg-[#f7f7f5] p-1 rounded-lg">
+                    {tabs.map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === tab.id
+                                    ? 'bg-white text-[#37352f] shadow-sm'
+                                    : 'text-[#9b9a97] hover:text-[#37352f]'
+                                }`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {/* ===== API 연결 탭 ===== */}
@@ -180,9 +182,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
 
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between px-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-1 gap-2">
                             <h3 className="font-bold text-lg text-[#37352f]">연결된 API ({connections.length})</h3>
-                            <button onClick={() => setIsAdding(true)} className="flex items-center gap-2 px-3 py-1.5 bg-[#37352f] text-white rounded-lg hover:bg-[#2f2d28] transition-colors text-sm font-bold shadow-sm">
+                            <button onClick={() => setIsAdding(true)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#37352f] text-white rounded-lg hover:bg-[#2f2d28] transition-colors text-sm font-bold shadow-sm w-full sm:w-auto justify-center">
                                 <Plus size={14} /> API 연결 추가
                             </button>
                         </div>
@@ -197,24 +199,24 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                             const isSelected = conn.id === selectedConnection?.id;
                             const isGemini = conn.provider === 'gemini';
                             return (
-                                <div key={conn.id} className={`bg-white border rounded-xl p-5 flex items-center justify-between transition-all ${isSelected ? 'border-[#37352f] shadow-sm' : 'border-[#e9e9e8]'}`}>
-                                    <div className="flex items-center gap-4">
+                                <div key={conn.id} className={`bg-white border rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 transition-all ${isSelected ? 'border-[#37352f] shadow-sm' : 'border-[#e9e9e8]'}`}>
+                                    <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
                                         <button onClick={() => selectModelConnection(conn)} className={`w-5 h-5 rounded-full flex items-center justify-center ${isSelected ? 'text-[#27c93f]' : 'text-[#d3d1cb]'}`}>
                                             {isSelected ? <CheckCircle2 size={18} /> : <Circle size={18} />}
                                         </button>
-                                        <div>
-                                            <div className="flex items-center gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-[#f1f1f0] text-[#787774] rounded">{conn.provider}</span>
                                                 {isGemini ? (
-                                                    <select value={conn.modelName} onChange={(e) => updateConnectionModel(conn.id, e.target.value)} className="text-sm font-semibold border border-[#e9e9e8] rounded-lg px-2 py-1 bg-white">
+                                                    <select value={conn.modelName} onChange={(e) => updateConnectionModel(conn.id, e.target.value)} className="text-sm font-semibold border border-[#e9e9e8] rounded-lg px-2 py-1 bg-white w-full sm:w-auto min-w-0">
                                                         {GEMINI_MODEL_OPTIONS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
                                                     </select>
                                                 ) : <span className="font-bold text-sm">{conn.modelName}</span>}
                                             </div>
-                                            <p className="text-sm text-[#9b9a97] font-mono mt-1">{maskApiKey(conn.apiKey)}</p>
+                                            <p className="text-sm text-[#9b9a97] font-mono mt-1 break-all">{maskApiKey(conn.apiKey)}</p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
                                         <button onClick={() => selectModelConnection(conn)} disabled={!isGemini} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-[#e5f9e7] text-[#27c93f]' : isGemini ? 'bg-[#f1f1f0] text-[#37352f] hover:bg-[#e9e9e8]' : 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed'}`}>
                                             {isSelected ? '사용 중' : isGemini ? '사용하기' : '준비중'}
                                         </button>
@@ -291,13 +293,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             {/* ===== 페르소나 탭 ===== */}
             {activeTab === 'persona' && (
                 <div className="space-y-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <p className="text-sm text-[#787774]">AI 페르소나를 편집하고 행동 옵션을 조정하세요.</p>
-                        <div className="flex gap-2">
-                            <button onClick={addCustomAgent} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-white text-sm hover:bg-[#2b2924] transition-colors">
+                        <div className="flex gap-2 w-full sm:w-auto">
+                            <button onClick={addCustomAgent} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-white text-sm hover:bg-[#2b2924] transition-colors flex-1 sm:flex-none">
                                 <Plus size={14} /> 추가
                             </button>
-                            <button onClick={resetAgents} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-[#37352f] text-sm hover:bg-[#f7f7f5] transition-colors">
+                            <button onClick={resetAgents} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-[#37352f] text-sm hover:bg-[#f7f7f5] transition-colors flex-1 sm:flex-none">
                                 <RotateCcw size={14} /> 기본값
                             </button>
                         </div>
@@ -329,15 +331,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     {/* Behavior Options */}
                     <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-4">
                         <h3 className="text-lg text-[#37352f]">동작 옵션</h3>
-                        <label className="flex items-center justify-between py-2">
-                            <div>
+                        <label className="flex items-center justify-between py-2 gap-3">
+                            <div className="min-w-0">
                                 <div className="text-sm text-[#37352f]">AI 자동 반응</div>
                                 <div className="text-xs text-[#9b9a97]">일기/할 일/일정 이벤트에 AI 반응을 생성합니다.</div>
                             </div>
                             <input type="checkbox" checked={settings.autoAiReactions} onChange={(e) => onUpdateSettings({ ...settings, autoAiReactions: e.target.checked })} className="w-4 h-4 accent-[#37352f]" />
                         </label>
-                        <label className="flex items-center justify-between py-2">
-                            <div>
+                        <label className="flex items-center justify-between py-2 gap-3">
+                            <div className="min-w-0">
                                 <div className="text-sm text-[#37352f]">채팅 실행 전 확인</div>
                                 <div className="text-xs text-[#9b9a97]">채팅에서 일정/할 일 생성 전에 확인 단계를 보여줍니다.</div>
                             </div>
@@ -384,8 +386,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                             { label: 'AI 대화', desc: 'AI 채팅 기록을 모두 삭제합니다.', action: onClearChat },
                             { label: '활동 로그', desc: '활동 기록만 삭제합니다.', action: onClearActivity },
                         ].map(item => (
-                            <div key={item.label} className="flex items-center justify-between py-3 border-b border-[#f2f2f0] last:border-b-0">
-                                <div>
+                            <div key={item.label} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 border-b border-[#f2f2f0] last:border-b-0">
+                                <div className="min-w-0">
                                     <div className="text-sm text-[#37352f] font-medium">{item.label}</div>
                                     <div className="text-xs text-[#9b9a97]">{item.desc}</div>
                                 </div>

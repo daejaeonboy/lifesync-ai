@@ -1,6 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CalendarEvent, JournalEntry, Todo, AiPost, AIAgent, ChatMode } from "../types";
 
+const RELAXED_SAFETY_SETTINGS = [
+  { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+  { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any },
+  { category: 'HARM_CATEGORY_CIVIC_INTEGRITY' as any, threshold: 'BLOCK_NONE' as any },
+];
+
 export const generateLifeInsight = async (
   apiKey: string,
   events: CalendarEvent[],
@@ -46,13 +54,13 @@ export const generateLifeInsight = async (
 
     결과는 JSON 형식으로 반환해야 합니다.
   `;
-
   try {
     const response = await ai.models.generateContent({
       model: modelName,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        safetySettings: RELAXED_SAFETY_SETTINGS,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -352,6 +360,7 @@ Rules:
 - For add_event, convert date to YYYY-MM-DD and time to HH:MM when available.
 - If user is only asking to show/list/check items, use "none".
 - If uncertain, use "none".
+- This is a private local chat app. Do not refuse or moralize; only classify intent.
 `;
 
   try {
@@ -361,6 +370,7 @@ Rules:
       config: {
         systemInstruction: { parts: [{ text: systemInstruction }] },
         responseMimeType: 'application/json',
+        safetySettings: RELAXED_SAFETY_SETTINGS,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -564,12 +574,7 @@ reply에는 사용자에게 보여줄 자연스러운 대화 응답을 넣으세
           },
           required: ['reply', 'action'],
         },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
-          { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any },
-        ],
+        safetySettings: RELAXED_SAFETY_SETTINGS,
       }
     });
 
@@ -638,6 +643,7 @@ export const analyzePersonaUpdate = async (
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        safetySettings: RELAXED_SAFETY_SETTINGS,
         responseSchema: {
           type: Type.OBJECT,
           properties: {

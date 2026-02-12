@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
 import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext, ChatSession, ChatMessage } from './types';
-import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users } from 'lucide-react';
+import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users, Menu } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
 import { supabase } from './utils/supabase';
@@ -91,6 +91,7 @@ const App: React.FC = () => {
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [currentView, setCurrentView] = useState<ViewState>(() => loadFromStorage('ls_current_view', 'chat'));
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // App Data State
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
@@ -245,6 +246,26 @@ const App: React.FC = () => {
     }
   }, [settings, currentUser]);
   useEffect(() => saveToStorage('ls_current_view', currentView), [currentView]);
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [currentView]);
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isMobileMenuOpen]);
   useEffect(() => saveToStorage('ls_calendar_tags', calendarTags), [calendarTags]);
   useEffect(() => saveToStorage('ls_journal_categories', journalCategories), [journalCategories]);
   useEffect(() => {
@@ -255,6 +276,14 @@ const App: React.FC = () => {
     saveToStorage('ls_chat_sessions', sessionsToSave);
   }, [chatSessions]);
   useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
+  useEffect(() => saveToStorage('ls_active_chat_agent', activeChatAgentId), [activeChatAgentId]);
+  useEffect(() => {
+    if (!activeChatSessionId) return;
+    const activeSession = chatSessions.find(session => session.id === activeChatSessionId);
+    if (activeSession?.agentId && activeSession.agentId !== activeChatAgentId) {
+      setActiveChatAgentId(activeSession.agentId);
+    }
+  }, [activeChatSessionId, chatSessions, activeChatAgentId]);
   useEffect(() => {
     if (currentUser) {
       saveToStorage('lifesync_user', currentUser);
@@ -1364,6 +1393,10 @@ const App: React.FC = () => {
     { id: 'todo', label: '할 일', icon: CheckSquare },
     { id: 'journal', label: '메모장', icon: BookOpen },
   ];
+  const mobileNavItems: { id: ViewState; label: string; icon: React.ElementType }[] = [
+    ...navItems,
+    { id: 'settings', label: '설정', icon: Settings2 },
+  ];
 
   const renderView = () => {
     switch (currentView) {
@@ -1506,7 +1539,14 @@ const App: React.FC = () => {
     }
   };
 
-  const headerLabel = navItems.find(i => i.id === currentView)?.label || 'Dashboard';
+  const headerLabel =
+    mobileNavItems.find(i => i.id === currentView)?.label ||
+    (currentView === 'settings' ? '설정' : 'Dashboard');
+
+  const handleMobileNavigate = (view: ViewState) => {
+    setCurrentView(view);
+    setIsMobileMenuOpen(false);
+  };
 
   if (showAuth && !currentUser) {
     return (
@@ -1529,9 +1569,9 @@ const App: React.FC = () => {
 
 
   return (
-    <div className="flex h-screen bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative">
+    <div className="flex h-[100dvh] bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative">
       {/* Sidebar Navigation */}
-      <aside className="w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
+      <aside className="hidden lg:flex w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
         <div>
           {/* Logo Section */}
           <button
@@ -1578,7 +1618,8 @@ const App: React.FC = () => {
                         title: '새 대화',
                         messages: [],
                         createdAt: new Date().toISOString(),
-                        lastMessageAt: new Date().toISOString()
+                        lastMessageAt: new Date().toISOString(),
+                        agentId: activeChatAgentId
                       };
                       setChatSessions(prev => [newSession, ...prev]);
                       setActiveChatSessionId(newId);
@@ -1600,7 +1641,12 @@ const App: React.FC = () => {
                       .map(session => (
                         <div key={session.id} className="group relative">
                           <button
-                            onClick={() => setActiveChatSessionId(session.id)}
+                            onClick={() => {
+                              setActiveChatSessionId(session.id);
+                              if (session.agentId) {
+                                setActiveChatAgentId(session.agentId);
+                              }
+                            }}
                             className={`w-full text-left px-3 py-1.5 rounded-[4px] transition-colors text-sm group ${activeChatSessionId === session.id
                               ? 'bg-[#efefef] text-[#37352f] font-medium'
                               : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'
@@ -1972,21 +2018,46 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white">
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white pb-0">
         {/* Top Mobile Bar (Visible only on small screens) */}
-        <header className="lg:hidden h-12 bg-white border-b border-[#e9e9e8] flex items-center justify-center font-semibold text-sm z-40 relative">
-          LifeSync
+        <header className="lg:hidden h-14 bg-white border-b border-[#e9e9e8] flex items-center justify-between px-4 font-semibold text-sm z-40 relative">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="w-8 h-8 rounded-md border border-[#e9e9e8] bg-white flex items-center justify-center text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
+              aria-label="전체 메뉴 열기"
+            >
+              <Menu size={16} />
+            </button>
+            <span className="text-[#37352f] truncate">{headerLabel}</span>
+          </div>
+          {currentUser ? (
+            <div className="w-7 h-7 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[11px] font-bold text-[#37352f]">
+              {currentUser?.name?.[0] || 'U'}
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAuthMode('login');
+                setShowAuth(true);
+              }}
+              className="text-[11px] font-semibold text-[#37352f] px-2.5 py-1 rounded-md border border-[#e9e9e8] bg-white"
+            >
+              로그인
+            </button>
+          )}
         </header>
 
         {/* Scrollable View Content */}
         <div className={`flex-1 relative scroll-smooth ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <div className={`h-full mx-auto ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'max-w-none p-0' : 'max-w-[1200px] p-4 lg:p-8 lg:pt-10'}`}>
+          <div className={`h-full mx-auto ${['todo', 'journal', 'board', 'calendar'].includes(currentView) ? 'max-w-none p-0' : 'max-w-[1200px] p-3 sm:p-4 lg:p-8 lg:pt-10'}`}>
             {renderView()}
           </div>
         </div>
 
         {undoToast && (
-          <div className="fixed bottom-6 right-6 z-50">
+          <div className="fixed bottom-20 lg:bottom-6 right-3 lg:right-6 left-3 lg:left-auto z-50">
             <div className="bg-[#37352f] text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
               <span className="text-sm">{undoToast.label}</span>
               <button
@@ -1999,6 +2070,156 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Mobile Slide Menu */}
+      <div className={`lg:hidden fixed inset-0 z-[80] transition-opacity duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+        <div
+          className="absolute inset-0 bg-black/30"
+          onClick={() => setIsMobileMenuOpen(false)}
+          aria-hidden="true"
+        />
+        <aside className={`absolute inset-y-0 left-0 w-[78vw] max-w-[320px] bg-white border-r border-[#e9e9e8] shadow-xl transform transition-transform duration-300 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          <div className="h-full flex flex-col">
+            <div className="h-14 px-4 border-b border-[#e9e9e8] flex items-center justify-between">
+              <span className="text-sm font-semibold text-[#37352f]">전체 메뉴</span>
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="w-8 h-8 rounded-md border border-[#e9e9e8] bg-white flex items-center justify-center text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
+                aria-label="메뉴 닫기"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              <nav className="space-y-1">
+                {mobileNavItems.map((item) => {
+                  const isActive = currentView === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleMobileNavigate(item.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
+                        ? 'bg-[#efefef] text-[#37352f] font-medium'
+                        : 'text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
+                    >
+                      <item.icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <div className="border-t border-[#e9e9e8] pt-3">
+                <div className="flex items-center justify-between px-1 mb-2">
+                  <span className="text-[11px] font-semibold text-[#787774] uppercase tracking-wide">채팅 내역</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newId = crypto.randomUUID();
+                      const newSession: ChatSession = {
+                        id: newId,
+                        title: '새 대화',
+                        messages: [],
+                        createdAt: new Date().toISOString(),
+                        lastMessageAt: new Date().toISOString(),
+                        agentId: activeChatAgentId
+                      };
+                      setChatSessions(prev => [newSession, ...prev]);
+                      setActiveChatSessionId(newId);
+                      setCurrentView('chat');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="p-1 rounded-md border border-[#e9e9e8] text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
+                    aria-label="새 채팅"
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
+                <div className="space-y-1 max-h-52 overflow-y-auto">
+                  {chatSessions.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-[#9b9a97]">저장된 대화가 없습니다.</div>
+                  ) : (
+                    [...chatSessions]
+                      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                      .slice(0, 12)
+                      .map((session) => (
+                        <div key={session.id} className="group flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveChatSessionId(session.id);
+                              if (session.agentId) {
+                                setActiveChatAgentId(session.agentId);
+                              }
+                              setCurrentView('chat');
+                              setIsMobileMenuOpen(false);
+                            }}
+                            className={`flex-1 text-left px-2.5 py-2 rounded-md text-sm transition-colors ${activeChatSessionId === session.id
+                              ? 'bg-[#efefef] text-[#37352f] font-medium'
+                              : 'text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
+                          >
+                            <span className="block truncate">{session.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm('이 채팅을 삭제할까요?')) {
+                                setChatSessions(prev => prev.filter(s => s.id !== session.id));
+                                if (activeChatSessionId === session.id) {
+                                  setActiveChatSessionId(null);
+                                }
+                              }
+                            }}
+                            className="shrink-0 p-1.5 rounded-md text-[#9b9a97] hover:bg-[#efefef] hover:text-[#eb5757] transition-colors"
+                            aria-label="채팅 삭제"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="p-3 border-t border-[#e9e9e8]">
+              {currentUser ? (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <div className="w-7 h-7 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[11px] font-bold text-[#37352f] flex-shrink-0">
+                      {currentUser?.name?.[0] || 'U'}
+                    </div>
+                    <span className="text-xs font-semibold text-[#37352f] truncate">{currentUser?.name}</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      handleLogout();
+                    }}
+                    className="p-1.5 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors"
+                    title="로그아웃"
+                    aria-label="로그아웃"
+                  >
+                    <LogOut size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setAuthMode('login');
+                    setShowAuth(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#37352f] text-white text-[12px] font-semibold rounded-lg hover:bg-black transition-all"
+                >
+                  <UserIcon size={14} />
+                  로그인 / 가입
+                </button>
+              )}
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent, ChatMessage, ChatSession } from '../types';
+import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent, ChatMessage, ChatMode } from '../types';
 import { generateLifeInsight, generateChatResponse, detectChatAction, analyzePersonaUpdate, ChatActionResult } from '../services/geminiService';
-import { Sparkles, ChevronRight } from '../components/Icons';
+import { Sparkles, ChevronRight, Plus } from '../components/Icons';
 import { format, parseISO, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { getActiveGeminiConfig } from '../utils/aiConfig';
@@ -21,6 +21,8 @@ interface ChatViewProps {
     settings: AppSettings;
     onUpdateSettings?: (settings: AppSettings) => void;
     agent?: AIAgent;
+    agents?: AIAgent[];
+    onSelectAgent?: (id: string) => void;
     onUpdateAgent?: (agentId: string, updates: Partial<AIAgent>) => void;
     onUserMessage?: (text: string) => void;
     initialMessages?: ChatMessage[];
@@ -77,6 +79,8 @@ const ChatView: React.FC<ChatViewProps> = ({
     settings,
     onUpdateSettings,
     agent,
+    agents = [],
+    onSelectAgent,
     onUpdateAgent,
     onUserMessage,
     initialMessages,
@@ -105,7 +109,7 @@ const ChatView: React.FC<ChatViewProps> = ({
         return {
             id: 'welcome',
             role: 'assistant',
-            content: `${userName}님, ${getTimeBasedGreeting()}\n\n${getTodaySummary(events, todos)}\n\n무엇을 도와드릴까요?`,
+            content: `주인님, ${getTimeBasedGreeting()}\n\n${getTodaySummary(events, todos)}\n\n무엇을 도와드릴까요?`,
             timestamp: new Date().toISOString(),
             quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록', '주간 분석해줘'],
         };
@@ -117,9 +121,17 @@ const ChatView: React.FC<ChatViewProps> = ({
     });
     const [inputValue, setInputValue] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [chatMode, setChatMode] = useState<ChatMode>('basic');
+    const [showToolbar, setShowToolbar] = useState(false);
     const [conversationContext, setConversationContext] = useState<string[]>([]); // For context awareness
     const [pendingAction, setPendingAction] = useState<ChatMessage['action'] | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const availableAgents = agents.length > 0 ? agents : (agent ? [agent] : []);
+    const chatModeLabels: Record<ChatMode, string> = {
+        basic: '기본',
+        roleplay: '롤플레잉',
+        learning: '학습',
+    };
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -135,8 +147,8 @@ const ChatView: React.FC<ChatViewProps> = ({
             if (initialMessages && initialMessages.length > 0) {
                 setMessages(initialMessages);
             } else {
-                // Keep current welcome message if new session is empty
-                setMessages(prev => prev.length === 0 ? [getWelcomeMessage()] : prev);
+                // New empty session should start from a fresh welcome message.
+                setMessages([getWelcomeMessage()]);
             }
         } else {
             // No session - reset to welcome
@@ -383,13 +395,13 @@ const ChatView: React.FC<ChatViewProps> = ({
         if (action?.type === 'onboarding') {
             if (action.data?.step === 1) {
                 return {
-                    content: `${action.data.name}님, 반가워요! 🎉\n\n저와 어떤 이야기를 나누고 싶으세요?\n\n편하게 선택해주시거나, 자유롭게 말씀해주세요!`,
+                    content: `주인님, 반가워요! 🎉\n\n저와 어떤 이야기를 나누고 싶으세요?\n\n편하게 선택해주시거나, 자유롭게 말씀해주세요!`,
                     quickReplies: ['일정 관리가 필요해', '할 일을 정리하고 싶어', '오늘 기분을 기록하고 싶어', '그냥 이야기하고 싶어'],
                 };
             }
             if (action.data?.step === 2) {
                 return {
-                    content: `좋아요! 이제 준비가 됐어요. ✨\n\n${userName}님의 하루를 더 나은 방향으로 이끌어 드릴게요.\n\n그럼 바로 시작해볼까요? 무엇이든 편하게 말씀해주세요!`,
+                    content: `좋아요! 이제 준비가 됐어요. ✨\n\n주인님의 하루를 더 나은 방향으로 이끌어 드릴게요.\n\n그럼 바로 시작해볼까요? 무엇이든 편하게 말씀해주세요!`,
                     quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록'],
                 };
             }
@@ -402,7 +414,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             // Check if user is just chatting
             if (userText.length < 10 && !userText.includes('?')) {
                 return {
-                    content: `네, ${userName || ''}님! 더 말씀해주세요. 듣고 있어요. 😊`,
+                    content: `네, 주인님! 더 말씀해주세요. 듣고 있어요. 😊`,
                     quickReplies: ['일정 추가하고 싶어', '할 일 정리해줘', '오늘 하루 어땠는지 기록할래'],
                 };
             }
@@ -451,7 +463,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             }
             case 'generate_insight':
                 return {
-                    content: `✅ AI 인사이트를 생성했어요!\n\n**AI 보드** 탭에서 ${userName || '사용자'}님의 라이프 분석 리포트를 확인해보세요. 📊\n\n더 많은 데이터가 쌓일수록 더 정확한 분석이 가능해요!`,
+                    content: `✅ AI 인사이트를 생성했어요!\n\n**AI 보드** 탭에서 주인님의 라이프 분석 리포트를 확인해보세요. 📊\n\n더 많은 데이터가 쌓일수록 더 정확한 분석이 가능해요!`,
                     quickReplies: ['분석 더 해줘', '오늘 할 일 뭐야?', '고마워'],
                 };
             default:
@@ -659,7 +671,9 @@ const ChatView: React.FC<ChatViewProps> = ({
                     todos,
                     entries,
                     userName,
-                    activeGeminiConfig.modelName
+                    activeGeminiConfig.modelName,
+                    agent,
+                    chatMode
                 );
 
                 const fallbackAction = mapGeminiActionToChatAction(result.action);
@@ -741,8 +755,6 @@ const ChatView: React.FC<ChatViewProps> = ({
 
     return (
         <div className="max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans">
-
-
             <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6 scrollbar-hide">
                 {messages.map((msg, index) => (
                     <div key={msg.id} className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
@@ -817,24 +829,70 @@ const ChatView: React.FC<ChatViewProps> = ({
             </div>
 
             {/* Input Area */}
-            <div className="p-4 border-t border-[#e9e9e8] bg-white">
-                <div className="flex gap-3 items-end">
+            <div className="p-4 bg-white">
+                <div className="space-y-3">
+                    {showToolbar && (
+                        <div className="p-3 rounded-xl border border-[#e9e9e8] bg-[#fbfbfa] space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                                {availableAgents.map((availableAgent) => (
+                                    <button
+                                        key={availableAgent.id}
+                                        type="button"
+                                        onClick={() => {
+                                            onSelectAgent?.(availableAgent.id);
+                                            setShowToolbar(false);
+                                        }}
+                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${agent?.id === availableAgent.id
+                                            ? 'border-[#37352f] bg-[#37352f] text-white'
+                                            : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
+                                    >
+                                        {availableAgent.emoji} {availableAgent.name}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {(['basic', 'roleplay', 'learning'] as ChatMode[]).map((mode) => (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => setChatMode(mode)}
+                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${chatMode === mode
+                                            ? 'border-[#37352f] bg-[#37352f] text-white'
+                                            : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
+                                    >
+                                        {chatModeLabels[mode]}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    <div className="flex gap-3 items-stretch">
+                        <button
+                            type="button"
+                            onClick={() => setShowToolbar(prev => !prev)}
+                            className="shrink-0 w-12 h-12 rounded-xl border border-[#e9e9e8] bg-white flex items-center justify-center text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
+                            aria-label="대화 도구 열기"
+                            title={`${agent?.name || 'LifeSync AI'} · ${chatModeLabels[chatMode]}`}
+                        >
+                            <Plus size={16} />
+                        </button>
                     <input
                         type="text"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                         placeholder={onboardingStep === 0 ? "이름을 입력해주세요..." : "무엇이든 말씀해주세요..."}
-                        className="flex-1 p-4 bg-[#f7f7f5] border border-[#e9e9e8] rounded-xl text-lg placeholder-[#d3d1cb] focus:outline-none focus:border-[#37352f] focus:bg-white transition-all"
+                        className="flex-1 h-12 px-4 bg-[#f7f7f5] border border-[#e9e9e8] rounded-xl text-base placeholder-[#d3d1cb] focus:outline-none focus:border-[#37352f] focus:bg-white transition-all"
                         disabled={isProcessing}
                     />
-                    <button
-                        onClick={() => handleSend()}
-                        disabled={!inputValue.trim() || isProcessing}
-                        className="p-4 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
-                    >
-                        <ChevronRight size={24} />
-                    </button>
+                        <button
+                            onClick={() => handleSend()}
+                            disabled={!inputValue.trim() || isProcessing}
+                            className="shrink-0 w-12 h-12 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm flex items-center justify-center"
+                        >
+                            <ChevronRight size={20} />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
