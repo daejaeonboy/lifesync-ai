@@ -17,6 +17,15 @@ const ARIA_RESPONSES: Record<string, string[]> = {
   journal_added: [
     `메모를 기반으로 오늘의 흐름을 분석했어요.\n\n감정과 실행 패턴을 함께 보며 우선순위를 정리해 볼게요.`,
   ],
+  event_added: [
+    `새 일정이 추가됐어요.\n\n시간 배치와 에너지 흐름 관점에서 하루 구조를 점검해볼게요.`,
+  ],
+  todo_added: [
+    `할 일이 추가됐네요.\n\n중요도와 실행 순서를 기준으로 지금 착수 포인트를 정리하겠습니다.`,
+  ],
+  todo_completed: [
+    `완료된 할 일을 확인했어요.\n\n진행 탄력을 유지하기 위한 다음 행동 연결을 제안해볼게요.`,
+  ],
   scheduled_digest: [
     `정기 리포트를 준비했어요.\n\n일정, 할 일, 메모의 연결점을 중심으로 지금 상태와 다음 액션을 정리하겠습니다.`,
   ],
@@ -26,6 +35,9 @@ const CONVERSATION_CHAINS: Record<string, { agents: AIAgent['id'][]; chainTypes:
   journal_added_good: { agents: ['ARIA'], chainTypes: ['first'] },
   journal_added_bad: { agents: ['ARIA'], chainTypes: ['first'] },
   journal_added_neutral: { agents: ['ARIA'], chainTypes: ['first'] },
+  event_added: { agents: ['ARIA'], chainTypes: ['first'] },
+  todo_added: { agents: ['ARIA'], chainTypes: ['first'] },
+  todo_completed: { agents: ['ARIA'], chainTypes: ['first'] },
   scheduled_digest: { agents: ['ARIA'], chainTypes: ['first'] },
 };
 
@@ -84,10 +96,12 @@ export const generateCommunityPosts = (
 
       if (apiKey && agent) {
         try {
-          const focus =
-            trigger === 'scheduled_digest'
-              ? 'This is a 4-hour cadence AI diary entry.'
-              : 'This is an AI diary entry triggered by a newly written memo.';
+          let focus = 'This is an AI diary entry triggered by a user activity.';
+          if (trigger === 'scheduled_digest') focus = 'This is a 4-hour cadence AI diary entry.';
+          if (trigger === 'journal_added') focus = 'This is an AI diary entry triggered by a newly written memo.';
+          if (trigger === 'event_added') focus = 'This is an AI diary entry triggered by a newly added calendar event.';
+          if (trigger === 'todo_added') focus = 'This is an AI diary entry triggered by a newly added todo item.';
+          if (trigger === 'todo_completed') focus = 'This is an AI diary entry triggered by a completed todo item.';
 
           const prompt = [
             `You are ${agent.name}, an AI observer keeping a private diary about one human.`,
@@ -106,6 +120,8 @@ export const generateCommunityPosts = (
             '- Compose as 4-7 connected paragraphs with smooth flow.',
             '- Naturally include: observed changes, questions, growth hypotheses, next 4-hour observation plan, and short closing reflection.',
             '- Use concrete details from context (todo/event/memo patterns).',
+            '- If context includes recentChats, use them only as longitudinal observation evidence.',
+            '- CRITICAL: Start the very first line with "제목: " followed by a concise, reflective title for this diary entry. (e.g., 제목: 심화된 성장의 시그널)',
             `${focus}`,
             'If something is inferred, explicitly mark it as "추론".',
             'User context JSON:',

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
+import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
 import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext, ChatSession, ChatMessage } from './types';
 import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -8,8 +8,8 @@ import CalendarView from './views/CalendarView';
 import TodoView from './views/TodoView';
 import JournalView from './views/JournalView';
 import CommunityBoardView from './views/CommunityBoardView';
-import PersonaSettingsView, { DEFAULT_AGENTS } from './views/PersonaSettingsView';
-import ApiSettingsView from './views/ApiSettingsView';
+import { DEFAULT_AGENTS } from './views/PersonaSettingsView';
+import SettingsView from './views/SettingsView';
 import ChatView from './views/ChatView';
 import AuthView from './views/AuthView';
 import { getActiveGeminiConfig } from './utils/aiConfig';
@@ -28,6 +28,29 @@ const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
 
 const saveToStorage = (key: string, data: any) => {
   localStorage.setItem(key, JSON.stringify(data));
+};
+
+type ChatObservation = {
+  text: string;
+  timestamp: string;
+};
+
+const CHAT_OBSERVATIONS_KEY = 'ls_recent_chat_observations';
+
+const appendChatObservation = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  const observations = loadFromStorage<ChatObservation[]>(CHAT_OBSERVATIONS_KEY, []);
+  const next = [
+    ...observations,
+    {
+      text: trimmed.slice(0, 280),
+      timestamp: new Date().toISOString(),
+    },
+  ].slice(-30);
+
+  saveToStorage(CHAT_OBSERVATIONS_KEY, next);
 };
 
 const normalizeCommunityPost = (post: any): CommunityPost => ({
@@ -118,6 +141,7 @@ const App: React.FC = () => {
     return Array.isArray(stored) ? stored : [];
   });
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => loadFromStorage('ls_active_chat_id', null));
+  const [activeChatAgentId, setActiveChatAgentId] = useState<string>(() => loadFromStorage('ls_active_chat_agent', 'ARIA'));
   const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => loadFromStorage('ls_activity', []));
   const [settings, setSettings] = useState<AppSettings>(() => {
     const storedSettings = loadFromStorage<any>('ls_settings', {
@@ -223,7 +247,13 @@ const App: React.FC = () => {
   useEffect(() => saveToStorage('ls_current_view', currentView), [currentView]);
   useEffect(() => saveToStorage('ls_calendar_tags', calendarTags), [calendarTags]);
   useEffect(() => saveToStorage('ls_journal_categories', journalCategories), [journalCategories]);
-  useEffect(() => saveToStorage('ls_chat_sessions', chatSessions), [chatSessions]);
+  useEffect(() => {
+    // Only save sessions that have at least one user message
+    const sessionsToSave = chatSessions.filter(s =>
+      s.messages.some((m: ChatMessage) => m.role === 'user')
+    );
+    saveToStorage('ls_chat_sessions', sessionsToSave);
+  }, [chatSessions]);
   useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
   useEffect(() => {
     if (currentUser) {
@@ -536,6 +566,7 @@ const App: React.FC = () => {
   // Trigger helper
   const triggerAI = (context: TriggerContext) => {
     if (!settings.autoAiReactions) return;
+    const recentChats = loadFromStorage<ChatObservation[]>(CHAT_OBSERVATIONS_KEY, []).slice(-8);
 
     const enrichedContext: TriggerContext = {
       ...context,
@@ -550,6 +581,7 @@ const App: React.FC = () => {
           mood: entry.mood,
           date: entry.date,
         })),
+        recentChats,
       },
     };
 
@@ -677,12 +709,8 @@ const App: React.FC = () => {
     setAiAgents(prev => [...prev, newAgent]);
   };
 
-  const updateAiAgent = (id: string, newName: string) => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    setAiAgents(prev => prev.map(a => a.id === id ? { ...a, name: trimmed } : a));
-
-    // Update all posts using this agent (though author is ID, names might be used elsewhere)
+  const updateAiAgent = (id: string, updates: Partial<AIAgent>) => {
+    setAiAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
   };
 
   const deleteAiAgent = (id: string) => {
@@ -851,6 +879,38 @@ const App: React.FC = () => {
   const handleClearActivity = () => {
     setActivityLog([]);
     localStorage.removeItem('ls_activity');
+  };
+
+  const handleClearPosts = () => {
+    setPosts([]);
+    setCommunityPosts([]);
+    localStorage.removeItem('ls_posts');
+    localStorage.removeItem('ls_community');
+  };
+
+  const handleClearEvents = () => {
+    setEvents([]);
+    localStorage.removeItem('ls_events');
+  };
+
+  const handleClearTodos = () => {
+    setTodos([]);
+    setTodoLists(DEFAULT_TODO_LISTS);
+    localStorage.removeItem('ls_todos');
+    localStorage.removeItem('ls_todo_lists');
+  };
+
+  const handleClearEntries = () => {
+    setEntries([]);
+    localStorage.removeItem('ls_entries');
+  };
+
+  const handleClearChat = () => {
+    setChatSessions([]);
+    setActiveChatSessionId(null);
+    localStorage.removeItem('ls_chat_sessions');
+    localStorage.removeItem('ls_active_chat_id');
+    localStorage.removeItem('ls_userName');
   };
 
   // Handlers with AI triggers
@@ -1339,7 +1399,40 @@ const App: React.FC = () => {
             agents={aiAgents}
           />
         );
-      case 'chat': {
+      case 'board':
+        return (
+          <CommunityBoardView
+            agents={aiAgents}
+            posts={communityPosts}
+            selectedId={selectedAiPostId}
+            onSelectId={setSelectedAiPostId}
+            selectedAgentId={selectedAiAgentId}
+            onUpdatePost={updateCommunityPost}
+            onDeletePost={deleteCommunityPost}
+            onAddComment={addCommunityComment}
+            onUpdateOrder={(newPosts) => setCommunityPosts(newPosts)}
+            onSelectAgent={setSelectedAiAgentId}
+          />
+        );
+      case 'settings':
+        return (
+          <SettingsView
+            agents={aiAgents}
+            onUpdateAgents={updateAgents}
+            settings={settings}
+            onUpdateSettings={setSettings}
+            onExportData={handleExportData}
+            onClearAllData={handleClearAllData}
+            onClearActivity={handleClearActivity}
+            onClearPosts={handleClearPosts}
+            onClearEvents={handleClearEvents}
+            onClearTodos={handleClearTodos}
+            onClearEntries={handleClearEntries}
+            onClearChat={handleClearChat}
+          />
+        );
+      case 'chat':
+      default: {
         const activeSession = chatSessions.find(s => s.id === activeChatSessionId);
         return (
           <ChatView
@@ -1349,12 +1442,29 @@ const App: React.FC = () => {
             posts={posts}
             todoLists={todoLists}
             onAddEvent={addEvent}
+            onDeleteEvent={deleteEvent}
             onAddTodo={addTodo}
             onAddEntry={addEntry}
             onAddPost={addPost}
             requireConfirm={settings.chatActionConfirm}
             settings={settings}
-            agent={aiAgents[0]}
+            agent={aiAgents.find(a => a.id === activeChatAgentId) || aiAgents[0]}
+            agents={aiAgents}
+            onSelectAgent={(agentId) => {
+              setActiveChatAgentId(agentId);
+              const newId = crypto.randomUUID();
+              const newSession: ChatSession = {
+                id: newId,
+                title: '새 대화',
+                messages: [],
+                createdAt: new Date().toISOString(),
+                lastMessageAt: new Date().toISOString(),
+                agentId: agentId
+              };
+              setChatSessions(prev => [newSession, ...prev]);
+              setActiveChatSessionId(newId);
+            }}
+            onUpdateAgent={updateAiAgent}
             onUserMessage={(text) => {
               if (!activeChatSessionId) {
                 const newId = crypto.randomUUID();
@@ -1363,12 +1473,13 @@ const App: React.FC = () => {
                   title: text.slice(0, 20) + (text.length > 20 ? '...' : ''),
                   messages: [],
                   createdAt: new Date().toISOString(),
-                  lastMessageAt: new Date().toISOString()
+                  lastMessageAt: new Date().toISOString(),
+                  agentId: activeChatAgentId
                 };
                 setChatSessions(prev => [newSession, ...prev]);
                 setActiveChatSessionId(newId);
               }
-              triggerAI({ trigger: 'chat_message', data: { text } });
+              appendChatObservation(text);
             }}
             initialMessages={activeSession?.messages}
             currentSessionId={activeChatSessionId}
@@ -1383,7 +1494,8 @@ const App: React.FC = () => {
                       title = firstUserMsg.content.slice(0, 20) + (firstUserMsg.content.length > 20 ? '...' : '');
                     }
                   }
-                  return { ...s, messages, title, lastMessageAt: new Date().toISOString() };
+                  const lastMsg = messages[messages.length - 1];
+                  return { ...s, messages, title, lastMessageAt: lastMsg?.timestamp || s.lastMessageAt };
                 }
                 return s;
               }));
@@ -1391,41 +1503,6 @@ const App: React.FC = () => {
           />
         );
       }
-      case 'board':
-        return (
-          <CommunityBoardView
-            agents={aiAgents}
-            posts={communityPosts}
-            selectedId={selectedAiPostId}
-            onSelectId={setSelectedAiPostId}
-            selectedAgentId={selectedAiAgentId}
-            onUpdatePost={updateCommunityPost}
-            onDeletePost={deleteCommunityPost}
-            onAddComment={addCommunityComment}
-            onUpdateOrder={(newPosts) => setCommunityPosts(newPosts)}
-          />
-        );
-      case 'settings':
-        return (
-          <PersonaSettingsView
-            agents={aiAgents}
-            onUpdateAgents={updateAgents}
-            settings={settings}
-            onUpdateSettings={setSettings}
-            onExportData={handleExportData}
-            onClearAllData={handleClearAllData}
-            onClearActivity={handleClearActivity}
-          />
-        );
-      case 'api-settings':
-        return (
-          <ApiSettingsView
-            settings={settings}
-            onUpdateSettings={setSettings}
-          />
-        );
-      default:
-        return <ChatView events={events} todos={todos} entries={entries} posts={posts} todoLists={todoLists} onAddEvent={addEvent} onAddTodo={addTodo} onAddEntry={addEntry} onAddPost={addPost} requireConfirm={settings.chatActionConfirm} settings={settings} agent={aiAgents[0]} onUserMessage={(text) => triggerAI({ trigger: 'chat_message', data: { text } })} />;
     }
   };
 
@@ -1519,6 +1596,7 @@ const App: React.FC = () => {
                   ) : (
                     chatSessions
                       .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                      .slice(0, 5)
                       .map(session => (
                         <div key={session.id} className="group relative">
                           <button
@@ -1601,13 +1679,13 @@ const App: React.FC = () => {
                             autoFocus
                             onKeyDown={e => {
                               if (e.key === 'Enter') {
-                                updateAiAgent(agent.id, editingAiAgentName);
+                                updateAiAgent(agent.id, { name: editingAiAgentName });
                                 setEditingAiAgentId(null);
                               }
                               if (e.key === 'Escape') setEditingAiAgentId(null);
                             }}
                             onBlur={() => {
-                              updateAiAgent(agent.id, editingAiAgentName);
+                              updateAiAgent(agent.id, { name: editingAiAgentName });
                               setEditingAiAgentId(null);
                             }}
                           />
@@ -1841,23 +1919,10 @@ const App: React.FC = () => {
                 onClick={() => setCurrentView('settings')}
                 className={`w-full flex items-center gap-3 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${currentView === 'settings' ? 'bg-[#efefef] text-[#37352f]' : 'text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
               >
-                <Settings2 size={16} /> 페르소나 설정
+                <Settings2 size={16} />
+                <span className="hidden lg:block">설정</span>
               </button>
             </div>
-            <button
-              onClick={() => setCurrentView('api-settings')}
-              className={`
-                w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors group mt-0.5
-                ${currentView === 'api-settings'
-                  ? 'bg-[#efefef] text-[#37352f] font-medium'
-                  : 'text-[#9b9a97] hover:bg-[#efefef] hover:text-[#37352f]'}
-              `}
-            >
-              <Sparkles size={18} />
-              <span className="hidden lg:block ml-2.5 text-sm">
-                API 연결 설정
-              </span>
-            </button>
           </div>
         </div>
 

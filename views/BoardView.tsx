@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { AiPost, CalendarEvent, Todo, JournalEntry, AppSettings } from '../types';
 import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, Layout, CalendarIcon, CheckSquare, BookOpen, ChevronRight, Check } from '../components/Icons';

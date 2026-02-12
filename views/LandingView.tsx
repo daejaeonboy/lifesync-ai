@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { Sparkles, BookOpen, MessageCircle, CheckSquare, Calendar, ArrowRight, Zap, Shield, Heart } from 'lucide-react';
 
 interface LandingViewProps {

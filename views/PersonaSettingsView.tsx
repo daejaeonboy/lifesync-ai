@@ -232,19 +232,11 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
               </button>
             </div>
             <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="text-xs text-[#787774]">
+              <label className="text-xs text-[#787774] md:col-span-2">
                 이름
                 <input
                   value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                />
-              </label>
-              <label className="text-xs text-[#787774]">
-                이모지
-                <input
-                  value={draft.emoji}
-                  onChange={(e) => setDraft({ ...draft, emoji: e.target.value })}
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
                 />
               </label>

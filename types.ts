@@ -143,7 +143,7 @@ export interface ChatMessage {
   content: string;
   timestamp: string; // ISO string
   action?: {
-    type: 'add_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
+    type: 'add_event' | 'delete_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
     data?: any;
     executed?: boolean;
   };
@@ -156,12 +156,15 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: string;
   lastMessageAt: string;
+  agentId?: string; // ID of the AI agent for this session
 }
+
+export type ChatMode = 'basic' | 'roleplay' | 'learning';
 
 export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings' | 'personas';
 
 export interface TriggerContext {
-  trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'chat_message' | 'scheduled_digest';
+  trigger: 'todo_completed' | 'todo_added' | 'event_added' | 'journal_added' | 'scheduled_digest';
   data: {
     text?: string;
     title?: string;
@@ -178,5 +181,6 @@ export interface TriggerContext {
     completedTodos?: number;
     totalEvents?: number;
     recentJournal?: { title: string; content: string; mood: string; date: string }[];
+    recentChats?: { text: string; timestamp: string }[];
   };
 }

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { JournalEntry, JournalCategory, Comment, AIAgent } from '../types';
 import {
   Trash2,

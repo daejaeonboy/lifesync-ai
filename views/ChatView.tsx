@@ -1,8 +1,8 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent, ChatMessage, ChatSession } from '../types';
-import { generateLifeInsight, generateChatResponse } from '../services/geminiService';
+import { generateLifeInsight, generateChatResponse, detectChatAction, analyzePersonaUpdate, ChatActionResult } from '../services/geminiService';
 import { Sparkles, ChevronRight } from '../components/Icons';
-import { format, parseISO, addDays, isSameDay } from 'date-fns';
+import { format, parseISO, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { getActiveGeminiConfig } from '../utils/aiConfig';
 
@@ -13,6 +13,7 @@ interface ChatViewProps {
     posts: AiPost[];
     todoLists: TodoList[];
     onAddEvent: (event: CalendarEvent) => void;
+    onDeleteEvent: (id: string) => void;
     onAddTodo: (text: string, listId?: string, dueDate?: string, category?: Todo['category']) => void;
     onAddEntry: (title: string, content: string, category?: string, mood?: JournalEntry['mood']) => void;
     onAddPost: (post: AiPost) => void;
@@ -20,6 +21,7 @@ interface ChatViewProps {
     settings: AppSettings;
     onUpdateSettings?: (settings: AppSettings) => void;
     agent?: AIAgent;
+    onUpdateAgent?: (agentId: string, updates: Partial<AIAgent>) => void;
     onUserMessage?: (text: string) => void;
     initialMessages?: ChatMessage[];
     onUpdateMessages?: (sessionId: string, messages: ChatMessage[]) => void;
@@ -67,6 +69,7 @@ const ChatView: React.FC<ChatViewProps> = ({
     posts,
     todoLists,
     onAddEvent,
+    onDeleteEvent,
     onAddTodo,
     onAddEntry,
     onAddPost,
@@ -74,6 +77,7 @@ const ChatView: React.FC<ChatViewProps> = ({
     settings,
     onUpdateSettings,
     agent,
+    onUpdateAgent,
     onUserMessage,
     initialMessages,
     onUpdateMessages,
@@ -154,102 +158,144 @@ const ChatView: React.FC<ChatViewProps> = ({
         }
     }, [userName]);
 
-    // Simple NLP to detect intent with context awareness
-    const parseUserIntent = (text: string): ChatMessage['action'] | null => {
-        const lowerText = text.toLowerCase();
-
-        // Check if we're in onboarding flow
+    const parseOnboardingIntent = (text: string): ChatMessage['action'] | null => {
         if (onboardingStep === 0 && !userName) {
-            return { type: 'onboarding', data: { step: 1, name: text.trim() } };
+            const cleaned = text
+                .trim()
+                .replace(/^(hi|hello|hey|안녕|안녕하세요)\s*/i, '')
+                .trim();
+            return { type: 'onboarding', data: { step: 1, name: (cleaned || text.trim()).slice(0, 20) } };
         }
         if (onboardingStep === 1) {
             return { type: 'onboarding', data: { step: 2, preference: text } };
         }
 
-        // Calendar/Event patterns
-        if (lowerText.includes('일정') || lowerText.includes('미팅') || lowerText.includes('약속') || lowerText.includes('회의') || lowerText.includes('예약')) {
-            // Check for "show" intent vs "add" intent
-            if (lowerText.includes('알려') || lowerText.includes('보여') || lowerText.includes('뭐가')) {
-                return null; // Just showing info, not adding
+        return null;
+    };
+
+    const mapGeminiActionToChatAction = (action: ChatActionResult['action'] | null | undefined): ChatMessage['action'] | null => {
+        if (!action || action.type === 'none') return null;
+
+        const normalizeText = (value?: string) => (value || '').toLowerCase().replace(/\s+/g, '').trim();
+        const resolveDeleteTarget = (payload: ChatActionResult['action']['deleteEvent']) => {
+            if (!payload) return null;
+
+            if (payload.id) {
+                const targetById = events.find(event => event.id === payload.id);
+                if (targetById) return targetById;
             }
 
-            const timeMatch = text.match(/(\d{1,2})시/);
-            const startTime = timeMatch ? `${timeMatch[1].padStart(2, '0')}:00` : undefined;
+            let candidates = [...events];
+            if (payload.date) {
+                candidates = candidates.filter(event => event.date === payload.date);
+            }
+            if (payload.startTime) {
+                candidates = candidates.filter(event => event.startTime === payload.startTime);
+            }
+            if (payload.title) {
+                const targetTitle = normalizeText(payload.title);
+                candidates = candidates.filter(event => {
+                    const eventTitle = normalizeText(event.title);
+                    return eventTitle.includes(targetTitle) || targetTitle.includes(eventTitle);
+                });
+            }
 
-            let dateOffset = 0;
-            if (lowerText.includes('내일')) dateOffset = 1;
-            else if (lowerText.includes('모레')) dateOffset = 2;
-            else if (lowerText.includes('다음주')) dateOffset = 7;
+            if (candidates.length === 0) return null;
+            if (candidates.length === 1) return candidates[0];
 
-            const eventDate = format(addDays(new Date(), dateOffset), 'yyyy-MM-dd');
+            const sorted = candidates.sort((a, b) => {
+                const aTs = new Date(`${a.date}T${a.startTime || '00:00'}:00`).getTime();
+                const bTs = new Date(`${b.date}T${b.startTime || '00:00'}:00`).getTime();
+                return aTs - bTs;
+            });
+            return sorted[0];
+        };
 
-            let title = text.replace(/내일|오늘|모레|다음주|오후|오전|\d+시에?|일정|잡아줘|추가해|등록해|해줘/g, '').trim();
-            if (title.length < 2) title = '새 일정';
-
+        if (action.type === 'add_event' && action.event) {
             return {
                 type: 'add_event',
                 data: {
                     id: crypto.randomUUID(),
-                    title: title,
-                    date: eventDate,
-                    startTime: startTime,
-                    type: lowerText.includes('중요') ? 'important' : 'work',
+                    title: action.event.title,
+                    date: action.event.date,
+                    startTime: action.event.startTime,
+                    endTime: action.event.endTime,
+                    type: action.event.type || 'tag_1',
                 } as CalendarEvent,
             };
         }
 
-        // Todo patterns
-        if (lowerText.includes('할 일') || lowerText.includes('할일') || lowerText.includes('추가') || lowerText.includes('사기') || lowerText.includes('하기') || lowerText.includes('해야')) {
-            let todoText = text.replace(/할 일|할일|목록에|추가해|등록해|줘|해야|돼/g, '').trim();
-            if (todoText.length < 2) todoText = '새 할 일';
-
-            const matchedList = todoLists.find(list => lowerText.includes(list.title.toLowerCase()));
-            const category: Todo['category'] =
-                lowerText.includes('운동') || lowerText.includes('헬스') || lowerText.includes('러닝') || lowerText.includes('산책')
-                    ? 'health'
-                    : lowerText.includes('사기') || lowerText.includes('장보기') || lowerText.includes('구매') || lowerText.includes('쇼핑')
-                        ? 'shopping'
-                        : lowerText.includes('업무') || lowerText.includes('회의') || lowerText.includes('프로젝트')
-                            ? 'work'
-                            : 'personal';
+        if (action.type === 'add_todo' && action.todo) {
+            const allowedCategories: Todo['category'][] = ['personal', 'work', 'health', 'shopping'];
+            const category = allowedCategories.includes(action.todo.category as Todo['category'])
+                ? (action.todo.category as Todo['category'])
+                : 'personal';
 
             return {
                 type: 'add_todo',
-                data: { text: todoText, category, listId: matchedList?.id },
+                data: {
+                    text: action.todo.text,
+                    dueDate: action.todo.dueDate,
+                    category,
+                },
             };
         }
 
-        // Journal/Emotional patterns - Enhanced with context
-        const emotionalKeywords = ['피곤', '힘들', '기분', '우울', '슬프', '화나', '짜증', '행복', '좋았', '신나', '설레', '외로', '불안'];
-        const hasEmotionalContent = emotionalKeywords.some(keyword => lowerText.includes(keyword));
-
-        if (hasEmotionalContent || lowerText.includes('오늘 하루') || lowerText.includes('였어') || lowerText.includes('이었어')) {
-            let mood: JournalEntry['mood'] = 'neutral';
-            if (lowerText.includes('좋') || lowerText.includes('행복') || lowerText.includes('신나') || lowerText.includes('설레')) mood = 'good';
-            if (lowerText.includes('피곤') || lowerText.includes('힘들') || lowerText.includes('슬프') || lowerText.includes('우울') || lowerText.includes('나쁨') || lowerText.includes('화나') || lowerText.includes('짜증')) mood = 'bad';
-
-            const normalized = text.replace(/\s+/g, ' ').trim();
-            const inferredTitle = normalized.length > 24 ? `${normalized.slice(0, 24)}…` : normalized;
+        if (action.type === 'add_journal' && action.journal) {
+            const mood = (['good', 'neutral', 'bad'] as const).includes(action.journal.mood as JournalEntry['mood'])
+                ? (action.journal.mood as JournalEntry['mood'])
+                : 'neutral';
 
             return {
                 type: 'add_journal',
                 data: {
-                    title: inferredTitle || '채팅 메모',
-                    content: text,
+                    title: action.journal.title,
+                    content: action.journal.content,
                     category: '메모장',
                     mood,
                 },
             };
         }
 
-        // AI Insight patterns
-        if (lowerText.includes('분석') || lowerText.includes('리포트') || lowerText.includes('인사이트') || lowerText.includes('조언') || lowerText.includes('패턴')) {
+        if (action.type === 'generate_insight') {
+            return { type: 'generate_insight' };
+        }
+
+        if (action.type === 'delete_event' && action.deleteEvent) {
+            const target = resolveDeleteTarget(action.deleteEvent);
+            if (!target) return null;
+
             return {
-                type: 'generate_insight',
+                type: 'delete_event',
+                data: {
+                    id: target.id,
+                    title: target.title,
+                    date: target.date,
+                    startTime: target.startTime,
+                },
             };
         }
 
         return null;
+    };
+
+    const requestBackgroundPersonaUpdate = (history: { role: 'user' | 'assistant'; content: string }[]) => {
+        if (!activeGeminiConfig?.apiKey || !agent || !onUpdateAgent) return;
+
+        analyzePersonaUpdate(
+            activeGeminiConfig.apiKey,
+            history,
+            agent,
+            activeGeminiConfig.modelName
+        )
+            .then((updates) => {
+                if (updates) {
+                    onUpdateAgent(agent.id, updates);
+                }
+            })
+            .catch((error) => {
+                console.error('Background persona update failed:', error);
+            });
     };
 
     const executeAction = async (action: ChatMessage['action']) => {
@@ -266,6 +312,11 @@ const ChatView: React.FC<ChatViewProps> = ({
                 break;
             case 'add_event':
                 onAddEvent(action.data);
+                break;
+            case 'delete_event':
+                if (action.data?.id) {
+                    onDeleteEvent(action.data.id);
+                }
                 break;
             case 'add_todo':
                 {
@@ -373,6 +424,11 @@ const ChatView: React.FC<ChatViewProps> = ({
                     content: `✅ 할 일 목록에 추가했어요!\n\n☑️ **${action.data.text ?? action.data}**\n🏷️ ${getListLabel(action.data.listId)}\n\n완료하면 체크해주세요! 화이팅! 💪`,
                     quickReplies: ['다른 할 일 추가', '지금 할 일 뭐야?', '고마워'],
                 };
+            case 'delete_event':
+                return {
+                    content: `🗑️ 일정을 삭제했어요.\n\n📅 **${action.data.title || '선택한 일정'}**${action.data.date ? `\n📆 ${format(parseISO(action.data.date), 'M월 d일 (EEEE)', { locale: ko })}` : ''}${action.data.startTime ? `\n⏰ ${action.data.startTime}` : ''}`,
+                    quickReplies: ['다른 일정도 삭제', '오늘 일정 알려줘', '고마워'],
+                };
             case 'add_journal': {
                 const moodEmoji = action.data.mood === 'good' ? '😊' : action.data.mood === 'bad' ? '😔' : '😐';
 
@@ -416,7 +472,7 @@ const ChatView: React.FC<ChatViewProps> = ({
 
     const requiresConfirmation = (action: ChatMessage['action'] | null) => {
         if (!requireConfirm) return false;
-        return action?.type === 'add_event' || action?.type === 'add_todo' || action?.type === 'add_journal';
+        return action?.type === 'delete_event' || action?.type === 'add_todo' || action?.type === 'add_journal';
     };
 
     const buildConfirmationPrompt = (action: ChatMessage['action']): { content: string; quickReplies: string[] } => {
@@ -424,6 +480,8 @@ const ChatView: React.FC<ChatViewProps> = ({
         if (action.type === 'add_event') {
             const eventDate = format(parseISO(action.data.date), 'M월 d일 (EEEE)', { locale: ko });
             summary = `📅 일정: **${action.data.title}**\n📆 ${eventDate}${action.data.startTime ? `\n⏰ ${action.data.startTime}` : ''}`;
+        } else if (action.type === 'delete_event') {
+            summary = `🗑️ 삭제 일정: **${action.data.title || '선택한 일정'}**${action.data.date ? `\n📆 ${format(parseISO(action.data.date), 'M월 d일 (EEEE)', { locale: ko })}` : ''}${action.data.startTime ? `\n⏰ ${action.data.startTime}` : ''}`;
         } else if (action.type === 'add_todo') {
             const text = action.data.text ?? action.data;
             summary = `☑️ 할 일: **${text}**\n🏷️ 목록: ${getListLabel(action.data.listId)}`;
@@ -443,8 +501,11 @@ const ChatView: React.FC<ChatViewProps> = ({
         if (!messageText.trim() || isProcessing) return;
 
         const trimmedMessage = messageText.trim();
-        const isConfirm = pendingAction && ['실행', '확인', '네', '응', '좋아'].includes(trimmedMessage);
-        const isCancel = pendingAction && ['취소', '아니', '그만', '나중에'].includes(trimmedMessage);
+        const normalizedMessage = trimmedMessage.toLowerCase().replace(/[.!?]/g, '');
+        const confirmKeywords = ['실행', '확인', '네', '응', '좋아', '그래', 'ㅇㅋ', 'ok', '오케이'];
+        const cancelKeywords = ['취소', '아니', '그만', '나중에', 'no'];
+        const isConfirm = Boolean(pendingAction) && confirmKeywords.includes(normalizedMessage);
+        const isCancel = Boolean(pendingAction) && cancelKeywords.includes(normalizedMessage);
 
         if (!isConfirm && !isCancel) {
             try {
@@ -467,9 +528,14 @@ const ChatView: React.FC<ChatViewProps> = ({
 
         // Update conversation context for awareness
         setConversationContext(prev => [...prev.slice(-4), messageText]);
+        const historyForPersona = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
+        if (trimmedMessage.length >= 8) {
+            requestBackgroundPersonaUpdate(historyForPersona);
+        }
 
-        // Simulate AI processing delay
-        await new Promise((resolve) => setTimeout(resolve, 600 + Math.random() * 400));
+        // Keep artificial delay minimal when API is available.
+        const delayMs = activeGeminiConfig?.apiKey ? 80 : 350;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
 
         if (pendingAction && (isConfirm || isCancel)) {
             if (isCancel) {
@@ -503,92 +569,170 @@ const ChatView: React.FC<ChatViewProps> = ({
         }
 
         if (pendingAction && !isConfirm && !isCancel) {
-            setPendingAction(null);
-        }
-
-        const action = parseUserIntent(messageText);
-
-        if (action && requiresConfirmation(action)) {
-            setPendingAction(action);
-            const prompt = buildConfirmationPrompt(action);
             const assistantMessage: ChatMessage = {
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: prompt.content,
+                content: '확인을 기다리고 있어요. `실행` 또는 `취소` 중 하나로 답해주세요.',
                 timestamp: new Date().toISOString(),
-                action,
-                quickReplies: prompt.quickReplies,
+                quickReplies: ['실행', '취소'],
             };
             setMessages((prev) => [...prev, assistantMessage]);
             setIsProcessing(false);
             return;
         }
 
-        if (action) {
-            await executeAction(action);
-            const response = getResponseForAction(action, messageText);
+        const onboardingAction = parseOnboardingIntent(messageText);
+        if (onboardingAction) {
+            await executeAction(onboardingAction);
+            const response = getResponseForAction(onboardingAction, messageText);
             const assistantMessage: ChatMessage = {
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 content: response.content,
                 timestamp: new Date().toISOString(),
-                action: { ...action, executed: true }, // executed flag
+                action: { ...onboardingAction, executed: true },
                 quickReplies: response.quickReplies,
             };
             setMessages((prev) => [...prev, assistantMessage]);
             setIsProcessing(false);
-        } else {
-            // General Chat / Fallback with API
-            if (activeGeminiConfig?.apiKey) {
-                try {
-                    // Create history for API (exclude current processing message which is already in 'messages' state? No, handleSend adds it to state)
-                    // Wait, setMessages is async. 'messages' variable might not have the new user message yet.
-                    // But we constructed 'userMessage' object.
-                    // So history should be [...messages, userMessage].
-                    const history = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
+            return;
+        }
 
-                    const reply = await generateChatResponse(
-                        activeGeminiConfig.apiKey,
-                        history,
-                        events,
-                        todos,
-                        entries,
-                        userName,
-                        activeGeminiConfig.modelName
-                    );
-
+        if (activeGeminiConfig?.apiKey) {
+            try {
+                const history = historyForPersona;
+                const detectedAction = await detectChatAction(
+                    activeGeminiConfig.apiKey,
+                    history,
+                    events,
+                    userName,
+                    activeGeminiConfig.modelName
+                );
+                const mappedAction = mapGeminiActionToChatAction(detectedAction);
+                if (!mappedAction && detectedAction?.type === 'delete_event') {
                     const assistantMessage: ChatMessage = {
                         id: crypto.randomUUID(),
                         role: 'assistant',
-                        content: reply,
+                        content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
                         timestamp: new Date().toISOString(),
+                        quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
+                    setIsProcessing(false);
+                    return;
+                }
 
-                } catch (error) {
-                    console.error(error);
+                if (mappedAction) {
+                    if (requiresConfirmation(mappedAction)) {
+                        setPendingAction(mappedAction);
+                        const prompt = buildConfirmationPrompt(mappedAction);
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: prompt.content,
+                            timestamp: new Date().toISOString(),
+                            action: mappedAction,
+                            quickReplies: prompt.quickReplies,
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                    } else {
+                        await executeAction(mappedAction);
+                        const response = getResponseForAction(mappedAction, messageText);
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: response.content,
+                            timestamp: new Date().toISOString(),
+                            action: { ...mappedAction, executed: true },
+                            quickReplies: response.quickReplies,
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                    }
+                    setIsProcessing(false);
+                    return;
+                }
+
+                const result = await generateChatResponse(
+                    activeGeminiConfig.apiKey,
+                    history,
+                    events,
+                    todos,
+                    entries,
+                    userName,
+                    activeGeminiConfig.modelName
+                );
+
+                const fallbackAction = mapGeminiActionToChatAction(result.action);
+                if (!fallbackAction && result.action?.type === 'delete_event') {
                     const assistantMessage: ChatMessage = {
                         id: crypto.randomUUID(),
                         role: 'assistant',
-                        content: "죄송해요, 대화 중 오류가 발생했어요. 다시 말씀해 주시겠어요?",
+                        content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
+                        timestamp: new Date().toISOString(),
+                        quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
+                    };
+                    setMessages((prev) => [...prev, assistantMessage]);
+                    setIsProcessing(false);
+                    return;
+                }
+                if (fallbackAction) {
+                    if (requiresConfirmation(fallbackAction)) {
+                        setPendingAction(fallbackAction);
+                        const prompt = buildConfirmationPrompt(fallbackAction);
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: prompt.content,
+                            timestamp: new Date().toISOString(),
+                            action: fallbackAction,
+                            quickReplies: prompt.quickReplies,
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                    } else {
+                        await executeAction(fallbackAction);
+                        const response = getResponseForAction(fallbackAction, messageText);
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: response.content,
+                            timestamp: new Date().toISOString(),
+                            action: { ...fallbackAction, executed: true },
+                            quickReplies: response.quickReplies,
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                    }
+                } else {
+                    const assistantMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: result.reply,
                         timestamp: new Date().toISOString(),
                     };
                     setMessages((prev) => [...prev, assistantMessage]);
                 }
-            } else {
-                // Fallback if no API Key
-                const response = getResponseForAction(null, messageText);
+            } catch (error) {
+                console.error(error);
                 const assistantMessage: ChatMessage = {
                     id: crypto.randomUUID(),
                     role: 'assistant',
-                    content: response.content,
+                    content: "죄송해요, 대화 중 오류가 발생했어요. 다시 말씀해 주시겠어요?",
                     timestamp: new Date().toISOString(),
-                    quickReplies: response.quickReplies,
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
             }
-            setIsProcessing(false);
+        } else {
+            const response = getResponseForAction(null, messageText);
+            const assistantMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: response.content,
+                timestamp: new Date().toISOString(),
+                quickReplies: response.quickReplies,
+            };
+            setMessages((prev) => [...prev, assistantMessage]);
         }
+
+        setIsProcessing(false);
     };
 
     const handleQuickReply = (reply: string) => {

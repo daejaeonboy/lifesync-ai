@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Todo, TodoList } from '../types';
 import { Check, ChevronRight, MoreVertical, CalendarIcon, Trash2, Plus, GripVertical } from '../components/Icons';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
