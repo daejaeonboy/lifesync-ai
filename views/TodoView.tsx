@@ -319,7 +319,7 @@ const SortableList = ({
       </div>
 
       {/* Sortable List Area */}
-      <div className="flex-1 overflow-y-auto px-2 pb-4 min-h-[50px]">
+      <div className="flex-1 overflow-y-auto px-2 pt-1 pb-4 min-h-[50px]">
         <SortableContext
           id={list.id}
           items={pending.map((t: Todo) => t.id)}
@@ -632,7 +632,7 @@ const TodoView: React.FC<TodoViewProps> = ({
     >
       <div
         ref={containerRef}
-        className="flex flex-col h-full bg-white font-sans overflow-auto select-none"
+        className="flex flex-col h-full bg-white font-sans overflow-y-auto overflow-x-hidden select-none"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -640,7 +640,7 @@ const TodoView: React.FC<TodoViewProps> = ({
         style={{ cursor: isPanning ? 'grabbing' : 'auto' }}
       >
         {/* Infinite Canvas Content Area */}
-        <div className="flex-1 p-10 min-w-fit min-h-fit">
+        <div className="flex-1 py-10 px-4 sm:px-8 min-w-fit min-h-fit">
           <SortableContext
             items={lists.map(l => l.id)}
             strategy={horizontalListSortingStrategy}

@@ -134,7 +134,7 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div
-                  className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-lg text-white"
+                  className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-lg text-white shrink-0"
                   style={{ backgroundColor: agent.color || '#37352f' }}
                 >
                   {agent.avatar ? (
@@ -231,6 +231,17 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                 <X size={16} />
               </button>
             </div>
+            <div className="p-6 flex flex-col items-center border-b border-[#efefef] bg-[#fbfbfa]">
+              <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center text-4xl text-white shadow-inner mb-2" style={{ backgroundColor: draft.color || '#37352f' }}>
+                {draft.avatar ? (
+                  <img src={draft.avatar} alt={draft.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span>{draft.emoji || '🤖'}</span>
+                )}
+              </div>
+              <div className="text-sm font-semibold text-[#37352f]">{draft.name || '새 페르소나'}</div>
+              <div className="text-xs text-[#9b9a97]">{draft.role || '역할을 입력하세요'}</div>
+            </div>
             <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-xs text-[#787774] md:col-span-2">
                 이름
@@ -265,14 +276,27 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f] resize-none"
                 />
               </label>
-              <label className="text-xs text-[#787774] md:col-span-2">
-                아바타 URL
-                <input
-                  value={draft.avatar || ''}
-                  onChange={(e) => setDraft({ ...draft, avatar: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                />
-              </label>
+              <div className="text-xs text-[#787774] md:col-span-2">
+                아바타 이미지
+                <div className="mt-1 flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={draft.avatar || ''}
+                    onChange={(e) => setDraft({ ...draft, avatar: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
+                    placeholder="이미지 URL"
+                  />
+                  <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-[#dcdcd9] rounded-lg hover:bg-[#f7f7f5] cursor-pointer text-[#37352f] shadow-sm w-full sm:w-auto">
+                    <Upload size={14} />
+                    <span className="font-bold">파일</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e, (url) => setDraft({ ...draft, avatar: url }))}
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="px-5 py-4 border-t border-[#efefef] flex justify-end gap-2">
               <button

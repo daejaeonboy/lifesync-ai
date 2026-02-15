@@ -59,6 +59,8 @@ const JournalView: React.FC<JournalViewProps> = ({
   const [isWriting, setIsWriting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showActions, setShowActions] = useState(false);
+  const [isListOpen, setIsListOpen] = useState(true);
+  const [visibleRows, setVisibleRows] = useState(5);
   const actionMenuRef = useRef<HTMLDivElement>(null);
 
   // Write Form State
@@ -160,8 +162,8 @@ const JournalView: React.FC<JournalViewProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-white relative">
-      <div className="h-14 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-10 flex-shrink-0">
-        <div className="flex items-center gap-2 overflow-hidden text-sm font-medium text-[#9b9a97]">
+      <div className="h-14 flex items-center justify-between px-4 sm:px-8 bg-white/80 backdrop-blur-md sticky top-0 z-10 flex-shrink-0 gap-4">
+        <div className="flex flex-1 items-center gap-2 overflow-hidden text-sm font-medium text-[#9b9a97] min-w-0">
           {isWriting ? (
             <span className="text-[#37352f] font-medium">{editingId ? '수정' : '작성'}</span>
           ) : selectedEntry ? (
@@ -175,23 +177,87 @@ const JournalView: React.FC<JournalViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setEditingId(null);
-              setNewTitle('');
-              setNewContent('');
-              setIsWriting(true);
-            }}
-            className="flex items-center gap-1.5 text-xs font-medium text-white bg-[#37352f] hover:bg-black px-4 py-2 rounded-full transition-all"
-          >
-            <Plus size={14} /> 메모하기
-          </button>
-        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-[800px] mx-auto py-20 px-10 w-full animate-in fade-in duration-500">
+        <div className="max-w-[800px] mx-auto py-20 px-4 sm:px-8 w-full animate-in fade-in duration-500">
+          {!isWriting && (
+            <div className="mb-16">
+              {/* Header Controls */}
+              <div className="flex items-center justify-between py-4 px-0 border-b border-[#f1f1f0]">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-[#37352f]">전체보기</span>
+                  <span className="text-sm text-[#787774]">{entries.filter(e => selectedCategory === 'all' || e.category === selectedCategory).length}개의 글</span>
+                </div>
+                <button
+                  onClick={() => setIsListOpen(!isListOpen)}
+                  className="text-sm text-[#37352f] hover:underline font-medium"
+                >
+                  {isListOpen ? '목록닫기' : '목록열기'}
+                </button>
+              </div>
+
+              {isListOpen && (
+                <>
+                  {/* Table Body */}
+                  <div className="">
+                    {entries.filter(e => selectedCategory === 'all' || e.category === selectedCategory)
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                      .slice(0, visibleRows)
+                      .map(entry => (
+                        <button
+                          key={entry.id}
+                          onClick={() => {
+                            onSelectId(entry.id);
+                          }}
+                          className="w-full flex items-center py-4 px-0 text-left transition-colors border-b border-[#f1f1f0] group outline-none"
+                        >
+                          <div className="flex-1 flex items-center gap-3 min-w-0 pr-4">
+                            <span className={`text-[14px] truncate font-medium ${selectedId === entry.id ? 'text-[#37352f]' : 'text-[#787774] group-hover:text-[#37352f]'}`}>
+                              {entry.title || '제목 없음'}
+                            </span>
+                          </div>
+                          <div className="w-32 flex-shrink-0 text-right text-[#9b9a97] text-[13px] tabular-nums">
+                            {format(parseISO(entry.date), 'yyyy. M. d.', { locale: ko })}
+                          </div>
+                        </button>
+                      ))
+                    }
+                  </div>
+
+                  {/* Footer Controls */}
+                  <div className="flex items-center justify-between py-6">
+                    <button
+                      onClick={() => {
+                        setEditingId(null);
+                        setNewTitle('');
+                        setNewContent('');
+                        setIsWriting(true);
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-medium text-white bg-[#37352f] hover:bg-black px-4 py-2 rounded-full transition-all shadow-sm"
+                    >
+                      <Plus size={14} /> 메모하기
+                    </button>
+                    <div className="relative">
+                      <select
+                        value={visibleRows}
+                        onChange={(e) => setVisibleRows(Number(e.target.value))}
+                        className="appearance-none bg-white border border-[#e9e9e8] rounded-md px-4 py-1.5 pr-10 text-xs font-medium text-[#37352f] focus:outline-none focus:ring-2 focus:ring-[#37352f]/5 cursor-pointer"
+                      >
+                        <option value={5}>5줄 보기</option>
+                        <option value={10}>10줄 보기</option>
+                        <option value={20}>20줄 보기</option>
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[#9b9a97]">
+                        <ChevronRight size={14} className="rotate-90" />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {isWriting ? (
             <div className="space-y-10">
               <div className="space-y-8">
@@ -212,7 +278,7 @@ const JournalView: React.FC<JournalViewProps> = ({
                   placeholder="제목을 입력하세요"
                   value={newTitle}
                   onChange={e => setNewTitle(e.target.value)}
-                  className="w-full text-[44px] font-medium border-none focus:ring-0 outline-none p-0 placeholder-[#e1e1e0] tracking-tight leading-tight"
+                  className="w-full text-[32px] font-medium border-none focus:ring-0 outline-none p-0 placeholder-[#e1e1e0] tracking-tight leading-tight"
                   autoFocus
                 />
               </div>
@@ -221,7 +287,7 @@ const JournalView: React.FC<JournalViewProps> = ({
                 placeholder="어떤 남기고 싶은 메모가 있나요? 자유롭게 기록해 보세요..."
                 value={newContent}
                 onChange={e => setNewContent(e.target.value)}
-                className="w-full text-[17px] leading-[1.8] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden"
+                className="w-full text-[16px] leading-[1.8] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden"
               />
               <div className="flex justify-end gap-3 pt-8 border-t border-[#f1f1f0]">
                 <button
@@ -245,9 +311,9 @@ const JournalView: React.FC<JournalViewProps> = ({
           ) : selectedEntry ? (
             <div className="space-y-12">
               <div className="space-y-8">
-                <div className="space-y-6 text-center lg:text-left">
+                <div className="space-y-6 text-left">
                   <div className="inline-block px-2.5 py-1 bg-[#f1f1f0] text-[#787774] text-[10px] font-medium uppercase tracking-widest rounded-md">{selectedEntry.category || '메모장'}</div>
-                  <h1 className="text-[52px] font-medium leading-[1.05] tracking-tighter text-[#1a1a1a]">
+                  <h1 className="text-[32px] font-medium leading-[1.2] tracking-tighter text-[#1a1a1a] break-keep">
                     {selectedEntry.title || '제목 없음'}
                   </h1>
 
@@ -284,7 +350,7 @@ const JournalView: React.FC<JournalViewProps> = ({
                 </div>
 
                 <div className="space-y-16">
-                  <div className="text-[19px] leading-[1.9] text-[#37352f] whitespace-pre-wrap min-h-[400px] prose prose-slate max-w-none">
+                  <div className="text-[16px] leading-[1.8] text-[#37352f] whitespace-pre-wrap min-h-[400px] prose prose-slate max-w-none">
                     {selectedEntry.content}
                   </div>
 
@@ -367,7 +433,7 @@ const JournalView: React.FC<JournalViewProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

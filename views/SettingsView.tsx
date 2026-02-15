@@ -1,17 +1,19 @@
-import React, { useState, useMemo } from 'react';
-import { AIAgent, AppSettings, ApiConnection } from '../types';
-import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X, CheckCircle2, Circle, FlaskConical } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { AIAgent, AppSettings, ApiConnection, User } from '../types';
+import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X, CheckCircle2, Circle, FlaskConical, Upload, Image as ImageIcon } from 'lucide-react';
 import { callGeminiAPI } from '../utils/gemini';
 import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS } from '../utils/aiConfig';
 import { DEFAULT_AGENTS } from './PersonaSettingsView';
 
-type SettingsTab = 'api' | 'persona' | 'data';
+type SettingsTab = 'account' | 'api' | 'persona' | 'data';
 
 interface SettingsViewProps {
     agents: AIAgent[];
     onUpdateAgents: (agents: AIAgent[]) => void;
     settings: AppSettings;
     onUpdateSettings: (settings: AppSettings) => void;
+    currentUser: User | null;
+    onUpdateUser: (user: User) => void;
     onExportData: () => void;
     onClearAllData: () => void;
     onClearActivity: () => void;
@@ -33,6 +35,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     onUpdateAgents,
     settings,
     onUpdateSettings,
+    currentUser,
+    onUpdateUser,
     onExportData,
     onClearAllData,
     onClearActivity,
@@ -42,7 +46,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     onClearEntries,
     onClearChat,
 }) => {
-    const [activeTab, setActiveTab] = useState<SettingsTab>('api');
+    const [activeTab, setActiveTab] = useState<SettingsTab>('account');
 
     // Persona states
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -57,6 +61,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         modelName: DEFAULT_GEMINI_MODEL,
         apiKey: '',
     });
+
+    const [userDraft, setUserDraft] = useState<User | null>(currentUser);
+    useEffect(() => {
+        if (currentUser) setUserDraft(currentUser);
+    }, [currentUser]);
 
     const connections = settings.apiConnections || [];
     const selectedConnection = useMemo(() => {
@@ -139,7 +148,26 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         } finally { setTestingId(null); }
     };
 
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            alert('파일 크기가 너무 큽니다 (최대 5MB)');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                callback(event.target.result as string);
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
     const tabs: { id: SettingsTab; label: string }[] = [
+        { id: 'account', label: '계정' },
         { id: 'api', label: 'API 연결' },
         { id: 'persona', label: '페르소나' },
         { id: 'data', label: '데이터 관리' },
@@ -161,8 +189,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`px-4 py-2 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === tab.id
-                                    ? 'bg-white text-[#37352f] shadow-sm'
-                                    : 'text-[#9b9a97] hover:text-[#37352f]'
+                                ? 'bg-white text-[#37352f] shadow-sm'
+                                : 'text-[#9b9a97] hover:text-[#37352f]'
                                 }`}
                         >
                             {tab.label}
@@ -170,6 +198,76 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     ))}
                 </div>
             </div>
+
+            {/* ===== 계정 탭 ===== */}
+            {activeTab === 'account' && (
+                <div className="space-y-6">
+                    <div className="bg-white border border-[#e9e9e8] rounded-xl p-6 sm:p-8 space-y-8">
+                        <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-[#f1f1f0]">
+                            <div className="relative group">
+                                <div className="w-24 h-24 rounded-full bg-[#f1f1f0] border-2 border-white shadow-md flex items-center justify-center text-3xl font-bold text-[#37352f] overflow-hidden">
+                                    {userDraft?.avatar ? (
+                                        <img src={userDraft.avatar} alt={userDraft.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        userDraft?.name?.[0] || 'U'
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex-1 text-center sm:text-left">
+                                <h3 className="text-xl font-bold text-[#37352f]">{userDraft?.name || '사용자'}</h3>
+                                <p className="text-sm text-[#9b9a97]">{userDraft?.email}</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-6 max-w-lg">
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-[#787774] uppercase tracking-wider px-1">이름</label>
+                                <input
+                                    type="text"
+                                    value={userDraft?.name || ''}
+                                    onChange={(e) => userDraft && setUserDraft({ ...userDraft, name: e.target.value })}
+                                    className="w-full px-4 py-3 rounded-xl border border-[#e9e9e8] bg-[#fbfbfa] text-[#37352f] outline-none focus:border-[#37352f] focus:bg-white transition-all"
+                                    placeholder="이름을 입력하세요"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-[#787774] uppercase tracking-wider px-1">프로필 이미지</label>
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    <input
+                                        type="text"
+                                        value={userDraft?.avatar || ''}
+                                        onChange={(e) => userDraft && setUserDraft({ ...userDraft, avatar: e.target.value })}
+                                        className="flex-1 px-4 py-3 rounded-xl border border-[#e9e9e8] bg-[#fbfbfa] text-[#37352f] outline-none focus:border-[#37352f] focus:bg-white transition-all font-mono text-sm"
+                                        placeholder="이미지 URL을 입력하거나 파일을 업로드하세요"
+                                    />
+                                    <label className="flex items-center justify-center gap-2 px-4 py-3 bg-white border border-[#e9e9e8] rounded-xl hover:bg-[#f7f7f5] transition-all cursor-pointer text-[#37352f] shadow-sm w-full sm:w-auto">
+                                        <Upload size={18} />
+                                        <span className="text-sm font-bold whitespace-nowrap">파일 선택</span>
+                                        <input
+                                            type="file"
+                                            className="hidden"
+                                            accept="image/*"
+                                            onChange={(e) => handleImageUpload(e, (url) => userDraft && setUserDraft({ ...userDraft, avatar: url }))}
+                                        />
+                                    </label>
+                                </div>
+                                <p className="text-[11px] text-[#9b9a97] px-1">내 PC에서 사진을 직접 선택하거나 외부 이미지 링크를 입력할 수 있습니다.</p>
+                            </div>
+
+                            <div className="pt-4">
+                                <button
+                                    onClick={() => userDraft && onUpdateUser(userDraft)}
+                                    className="flex items-center justify-center gap-2 px-6 py-3 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] transition-all font-bold shadow-md active:scale-95 disabled:opacity-50"
+                                    disabled={!userDraft?.name}
+                                >
+                                    <Save size={18} />
+                                    프로필 저장하기
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ===== API 연결 탭 ===== */}
             {activeTab === 'api' && (
@@ -310,7 +408,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                             <div key={agent.id} className="bg-white border border-[#e9e9e8] rounded-xl p-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-lg text-white" style={{ backgroundColor: agent.color || '#37352f' }}>
+                                        <div className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-lg text-white shrink-0" style={{ backgroundColor: agent.color || '#37352f' }}>
                                             {agent.avatar ? <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" /> : <span>{agent.emoji || '🤖'}</span>}
                                         </div>
                                         <div className="min-w-0">
@@ -355,12 +453,38 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                                     <h4 className="text-[#37352f]">{editingTarget ? '페르소나 편집' : '새 페르소나'}</h4>
                                     <button onClick={closeEditor} className="p-1 rounded-md hover:bg-[#f2f2f0] text-[#787774]"><X size={16} /></button>
                                 </div>
+                                <div className="p-6 flex flex-col items-center border-b border-[#efefef] bg-[#fbfbfa]">
+                                    <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center text-4xl text-white shadow-inner mb-2" style={{ backgroundColor: draft.color || '#37352f' }}>
+                                        {draft.avatar ? (
+                                            <img src={draft.avatar} alt={draft.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span>{draft.emoji || '🤖'}</span>
+                                        )}
+                                    </div>
+                                    <div className="text-sm font-semibold text-[#37352f]">{draft.name || '새 페르소나'}</div>
+                                    <div className="text-xs text-[#9b9a97]">{draft.role || '역할을 입력하세요'}</div>
+                                </div>
                                 <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <label className="text-xs text-[#787774] md:col-span-2">이름<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]" /></label>
                                     <label className="text-xs text-[#787774]">역할<input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]" /></label>
                                     <label className="text-xs text-[#787774]">톤<input value={draft.tone} onChange={(e) => setDraft({ ...draft, tone: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]" /></label>
                                     <label className="text-xs text-[#787774] md:col-span-2">성격<textarea value={draft.personality} onChange={(e) => setDraft({ ...draft, personality: e.target.value })} rows={3} className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f] resize-none" /></label>
-                                    <label className="text-xs text-[#787774] md:col-span-2">아바타 URL<input value={draft.avatar || ''} onChange={(e) => setDraft({ ...draft, avatar: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]" /></label>
+                                    <div className="text-xs text-[#787774] md:col-span-2">
+                                        아바타 이미지
+                                        <div className="mt-1 flex flex-col sm:flex-row gap-2">
+                                            <input value={draft.avatar || ''} onChange={(e) => setDraft({ ...draft, avatar: e.target.value })} className="flex-1 px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]" placeholder="이미지 URL" />
+                                            <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-[#dcdcd9] rounded-lg hover:bg-[#f7f7f5] cursor-pointer text-[#37352f] shadow-sm w-full sm:w-auto">
+                                                <Upload size={14} />
+                                                <span className="font-bold">파일</span>
+                                                <input
+                                                    type="file"
+                                                    className="hidden"
+                                                    accept="image/*"
+                                                    onChange={(e) => handleImageUpload(e, (url) => setDraft({ ...draft, avatar: url }))}
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div className="px-5 py-4 border-t border-[#efefef] flex justify-end gap-2">
                                     <button onClick={closeEditor} className="px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm text-[#37352f] hover:bg-[#f7f7f5]">취소</button>

@@ -754,28 +754,28 @@ const ChatView: React.FC<ChatViewProps> = ({
     };
 
     return (
-        <div className="max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans">
-            <div className="flex-1 overflow-y-auto px-2 py-6 space-y-6 scrollbar-hide">
+        <div className="w-full max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans overflow-x-hidden" style={{ touchAction: 'pan-y' }}>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-2 py-6 space-y-6 scrollbar-hide" style={{ touchAction: 'pan-y' }}>
                 {messages.map((msg, index) => (
-                    <div key={msg.id} className={`flex w-full mb-6 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
+                    <div key={msg.id} className={`flex w-full mb-6 min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
                         {msg.role === 'assistant' && (
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#37352f] flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
                                 {agent?.avatar ? (
                                     <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
                                 ) : (
-                                    <span className="text-sm">{agent?.emoji || <Sparkles size={14} />}</span>
+                                    <div className="w-full h-full bg-[#37352f]" />
                                 )}
                             </div>
                         )}
 
-                        <div className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`flex flex-col min-w-0 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                             {msg.role === 'assistant' && (
                                 <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{agent?.name || 'LifeSync AI'}</span>
                             )}
 
                             <div
                                 className={`
-                                    p-3.5 rounded-2xl whitespace-pre-line leading-relaxed shadow-sm text-[15px]
+                                    p-3.5 rounded-2xl whitespace-pre-line leading-relaxed shadow-sm text-[14px] sm:text-[15px] break-words [overflow-wrap:anywhere]
                                     ${msg.role === 'user'
                                         ? 'bg-[#37352f] text-white rounded-br-sm'
                                         : 'bg-white border border-[#e9e9e8] text-[#37352f] rounded-bl-sm'}
@@ -788,12 +788,12 @@ const ChatView: React.FC<ChatViewProps> = ({
 
                             {/* Quick Replies - Only for the first message */}
                             {msg.role === 'assistant' && index === 0 && msg.quickReplies && msg.quickReplies.length > 0 && (
-                                <div className="flex flex-wrap gap-2 mt-3 ml-1">
+                                <div className="flex flex-wrap gap-2 mt-3 ml-1 max-w-full">
                                     {msg.quickReplies.map((reply, idx) => (
                                         <button
                                             key={idx}
                                             onClick={() => handleQuickReply(reply)}
-                                            className="px-3 py-1.5 text-xs font-medium bg-white border border-[#e9e9e8] text-[#787774] rounded-lg hover:bg-[#f7f7f5] hover:text-[#37352f] transition-all"
+                                            className="max-w-full px-3 py-1.5 text-xs font-medium bg-white border border-[#e9e9e8] text-[#787774] rounded-lg hover:bg-[#f7f7f5] hover:text-[#37352f] transition-all whitespace-normal break-words text-left"
                                         >
                                             {reply}
                                         </button>
@@ -805,12 +805,12 @@ const ChatView: React.FC<ChatViewProps> = ({
                 ))}
 
                 {isProcessing && (
-                    <div className="flex w-full mb-6 justify-start items-start gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
+                    <div className="flex w-full mb-6 justify-start items-start gap-3 min-w-0">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[#37352f] flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
                             {agent?.avatar ? (
                                 <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
                             ) : (
-                                <span className="text-sm">{agent?.emoji || <Sparkles size={14} />}</span>
+                                <div className="w-full h-full bg-[#37352f]" />
                             )}
                         </div>
                         <div className="flex flex-col items-start">
@@ -829,7 +829,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-white">
+            <div className="px-2 py-3 bg-white overflow-x-hidden">
                 <div className="space-y-3">
                     {showToolbar && (
                         <div className="p-3 rounded-xl border border-[#e9e9e8] bg-[#fbfbfa] space-y-3">
@@ -842,11 +842,18 @@ const ChatView: React.FC<ChatViewProps> = ({
                                             onSelectAgent?.(availableAgent.id);
                                             setShowToolbar(false);
                                         }}
-                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${agent?.id === availableAgent.id
+                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors flex items-center gap-2 ${agent?.id === availableAgent.id
                                             ? 'border-[#37352f] bg-[#37352f] text-white'
                                             : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
                                     >
-                                        {availableAgent.emoji} {availableAgent.name}
+                                        <div className="w-4 h-4 rounded-full overflow-hidden bg-current flex-shrink-0 flex items-center justify-center">
+                                            {availableAgent.avatar ? (
+                                                <img src={availableAgent.avatar} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className={`w-full h-full ${agent?.id === availableAgent.id ? 'bg-white/20' : 'bg-[#37352f]'}`} />
+                                            )}
+                                        </div>
+                                        <span>{availableAgent.name}</span>
                                     </button>
                                 ))}
                             </div>
@@ -866,7 +873,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                             </div>
                         </div>
                     )}
-                    <div className="flex gap-3 items-stretch">
+                    <div className="flex gap-2 items-stretch min-w-0">
                         <button
                             type="button"
                             onClick={() => setShowToolbar(prev => !prev)}
@@ -876,15 +883,15 @@ const ChatView: React.FC<ChatViewProps> = ({
                         >
                             <Plus size={16} />
                         </button>
-                    <input
-                        type="text"
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder={onboardingStep === 0 ? "이름을 입력해주세요..." : "무엇이든 말씀해주세요..."}
-                        className="flex-1 h-12 px-4 bg-[#f7f7f5] border border-[#e9e9e8] rounded-xl text-base placeholder-[#d3d1cb] focus:outline-none focus:border-[#37352f] focus:bg-white transition-all"
-                        disabled={isProcessing}
-                    />
+                        <input
+                            type="text"
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                            placeholder={onboardingStep === 0 ? "이름을 입력해주세요..." : "무엇이든 말씀해주세요..."}
+                            className="flex-1 min-w-0 h-12 px-4 bg-[#f7f7f5] border border-[#e9e9e8] rounded-xl text-base placeholder-[#d3d1cb] focus:outline-none focus:border-[#37352f] focus:bg-white transition-all"
+                            disabled={isProcessing}
+                        />
                         <button
                             onClick={() => handleSend()}
                             disabled={!inputValue.trim() || isProcessing}

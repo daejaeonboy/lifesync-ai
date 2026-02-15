@@ -141,32 +141,13 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
             </div>
 
             <main className="flex-1 overflow-y-auto custom-scrollbar bg-white">
-                <div className="max-w-[800px] mx-auto py-12 px-10 w-full animate-in fade-in duration-500">
-                    {/* 1. Top Section: Persona Info */}
-                    <div className="space-y-8 mb-12">
-                        <div className="flex items-center gap-4">
-                            <div className="w-16 h-16 rounded-3xl overflow-hidden flex items-center justify-center text-3xl bg-[#f7f7f5] border border-[#e9e9e8] shadow-sm">
-                                {selectedAgent?.avatar ? (
-                                    <img src={selectedAgent.avatar} alt={selectedAgent.name} className="w-full h-full object-cover" />
-                                ) : (
-                                    <span>{selectedAgent?.emoji}</span>
-                                )}
-                            </div>
-                            <div className="flex flex-col gap-1">
-                                <h1 className="text-3xl font-bold tracking-tight text-[#37352f]">
-                                    {selectedAgent?.name}의 기록관
-                                </h1>
-                                <p className="text-sm text-[#9b9a97] font-medium uppercase tracking-[0.05em]">
-                                    {selectedAgent?.role || 'AI 페르소나'} • {posts.filter(p => p.author === selectedAgentId).length}개의 일기
-                                </p>
-                            </div>
-                        </div>
-                    </div>
+                <div className="max-w-[800px] mx-auto py-12 px-4 sm:px-8 w-full animate-in fade-in duration-500">
+
 
                     {/* 2. Middle Section: Table-style Post List (From Image) */}
                     <div className="mb-16">
                         {/* Header Controls */}
-                        <div className="flex items-center justify-between py-4 border-b border-[#f1f1f0]">
+                        <div className="flex items-center justify-between py-4 px-0 border-b border-[#f1f1f0]">
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-[#37352f]">전체보기</span>
                                 <span className="text-sm text-[#787774]">{posts.filter(p => p.author === selectedAgentId).length}개의 글</span>
@@ -181,11 +162,7 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
 
                         {isListOpen && (
                             <>
-                                {/* Table Header */}
-                                <div className="flex items-center text-[11px] font-semibold text-[#9b9a97] py-3 px-4 bg-[#fafafa]/50">
-                                    <div className="flex-1">글 제목</div>
-                                    <div className="w-32 text-right">작성일</div>
-                                </div>
+
 
                                 {/* Table Body */}
                                 <div className="">
@@ -208,8 +185,7 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                                         element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                                                         onSelectId(post.id);
                                                     }}
-                                                    className={`w-full flex items-center py-4 px-4 text-left transition-colors hover:bg-[#f7f7f5] group outline-none ${selectedId === post.id ? 'bg-[#f7f7f5]/80' : ''
-                                                        }`}
+                                                    className="w-full flex items-center py-4 px-0 text-left transition-colors border-b border-[#f1f1f0] group outline-none"
                                                 >
                                                     <div className="flex-1 flex items-center gap-3 min-w-0 pr-4">
                                                         <div className="flex items-center gap-3 min-w-0">
@@ -233,7 +209,7 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                         <select
                                             value={visibleRows}
                                             onChange={(e) => setVisibleRows(Number(e.target.value))}
-                                            className="appearance-none bg-white border border-[#e9e9e8] rounded-md px-4 py-1.5 pr-10 text-xs font-medium text-[#37352f] focus:outline-none focus:ring-2 focus:ring-[#37352f]/5 shadow-sm cursor-pointer"
+                                            className="appearance-none bg-white border border-[#e9e9e8] rounded-md px-4 py-1.5 pr-10 text-xs font-medium text-[#37352f] focus:outline-none focus:ring-2 focus:ring-[#37352f]/5 cursor-pointer"
                                         >
                                             <option value={5}>5줄 보기</option>
                                             <option value={10}>10줄 보기</option>
@@ -256,6 +232,17 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                 const isCurrent = selectedId === post.id;
                                 const isEditingThis = isEditing && isCurrent;
 
+                                // Extract Title and Body
+                                const lines = post.content.split('\n');
+                                const firstLine = lines[0] || '';
+                                const hasExplicitTitle = firstLine.startsWith('제목:');
+                                const displayTitle = hasExplicitTitle
+                                    ? firstLine.replace('제목:', '').trim()
+                                    : (firstLine.replace(/#+\s*/, '') || '제목 없음');
+                                const displayBody = lines.slice(1).join('\n').trim();
+
+                                const formattedDate = format(parseISO(post.timestamp), 'yyyy년 M월 d일 HH:mm', { locale: ko });
+
                                 return (
                                     <article
                                         key={post.id}
@@ -263,85 +250,73 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                         className="scroll-mt-24 transition-all duration-500 opacity-100"
                                     >
                                         <div className="space-y-8">
-                                            <div className="flex items-center justify-between border-b border-[#f1f1f0] pb-6">
-                                                <div className="flex flex-col gap-2">
-                                                    <div className="flex items-center gap-2 text-xs text-[#9b9a97]">
-                                                        <span className="font-bold text-[#37352f]">{format(parseISO(post.timestamp), 'yyyy년 M월 d일', { locale: ko })}</span>
-                                                        <span className="w-px h-2 bg-[#e9e9e8]" />
-                                                        <span className="font-medium">{format(parseISO(post.timestamp), 'HH:mm', { locale: ko })}</span>
-                                                    </div>
-                                                </div>
-
-                                                <div className="relative" ref={isCurrent ? actionMenuRef : null}>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onSelectId(post.id);
-                                                            setShowActions(!showActions);
-                                                        }}
-                                                        className="p-2 hover:bg-[#f2f2f0] rounded-lg transition-all text-[#9b9a97] hover:text-[#37352f]"
-                                                    >
-                                                        <MoreVertical size={18} />
-                                                    </button>
-                                                    {showActions && isCurrent && (
-                                                        <div className="absolute right-0 mt-2 w-36 bg-white border border-[#e9e9e8] rounded-xl shadow-xl z-20 py-1.5 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/5">
-                                                            <button onClick={handleEdit} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#37352f] hover:bg-[#f7f7f5] transition-colors text-left font-medium">
-                                                                <Edit3 size={14} className="text-[#9b9a97]" /> 수정하기
-                                                            </button>
-                                                            <button onClick={() => { onDeletePost(post.id); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left font-medium">
-                                                                <Trash2 size={14} /> 삭제하기
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
                                             {isEditingThis ? (
                                                 <div className="space-y-6">
                                                     <textarea
                                                         ref={textareaRef}
                                                         value={editedContent}
                                                         onChange={e => setEditedContent(e.target.value)}
-                                                        className="w-full text-[17px] leading-[1.7] text-[#37352f] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden font-sans"
+                                                        className="w-full text-[16px] leading-[1.7] text-[#37352f] border-none focus:ring-0 outline-none p-0 resize-none placeholder-[#e1e1e0] overflow-hidden font-sans"
                                                         autoFocus
                                                     />
                                                     <div className="flex justify-end gap-3 pt-8 border-t border-[#f1f1f0]">
                                                         <button onClick={() => setIsEditing(false)} className="px-5 py-2.5 text-sm font-medium text-[#787774] hover:bg-[#f5f5f5] rounded-xl transition-colors">취소</button>
-                                                        <button onClick={handleSave} className="px-8 py-2.5 bg-[#37352f] text-white text-sm font-medium rounded-xl hover:bg-black transition-all shadow-lg">저장</button>
+                                                        <button onClick={handleSave} className="px-8 py-2.5 bg-[#37352f] text-white text-sm font-medium rounded-xl hover:bg-black transition-all">저장</button>
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <div className="space-y-16">
-                                                    <div className="space-y-6">
-                                                        {(() => {
-                                                            const lines = post.content.split('\n');
-                                                            const firstLine = lines[0] || '';
-                                                            const hasExplicitTitle = firstLine.startsWith('제목:');
+                                                <>
+                                                    {/* 1. Title */}
+                                                    <h2 className="text-[32px] font-medium text-[#37352f] leading-tight font-sans">
+                                                        {displayTitle}
+                                                    </h2>
 
-                                                            if (hasExplicitTitle) {
-                                                                const title = firstLine.replace('제목:', '').trim();
-                                                                const body = lines.slice(1).join('\n').trim();
-                                                                return (
-                                                                    <>
-                                                                        <h2 className="text-2xl font-bold text-[#37352f] leading-tight font-sans">
-                                                                            {title}
-                                                                        </h2>
-                                                                        <div className="text-[17px] leading-[1.7] text-[#37352f] whitespace-pre-wrap font-sans">
-                                                                            {body}
-                                                                        </div>
-                                                                    </>
-                                                                );
-                                                            }
+                                                    {/* 2. Meta Row (Date + Actions) */}
+                                                    <div className="flex items-center justify-between border-b border-[#f1f1f0] pb-6">
+                                                        <div className="flex items-center gap-3 text-xs text-[#9b9a97]">
+                                                            {/* Persona Profile Image (32px) */}
+                                                            <div className="w-8 h-8 rounded-full overflow-hidden border border-[#e9e9e8] flex-shrink-0 flex items-center justify-center bg-[#f7f7f5]">
+                                                                {selectedAgent?.avatar ? (
+                                                                    <img src={selectedAgent.avatar} alt={selectedAgent.name} className="w-full h-full object-cover" />
+                                                                ) : (
+                                                                    <span className="text-base">{selectedAgent?.emoji}</span>
+                                                                )}
+                                                            </div>
+                                                            <span className="font-medium text-[#787774]">
+                                                                {formattedDate}
+                                                            </span>
+                                                        </div>
 
-                                                            return (
-                                                                <div className="text-[17px] leading-[1.7] text-[#37352f] whitespace-pre-wrap font-sans">
-                                                                    {post.content}
+                                                        <div className="relative" ref={isCurrent ? actionMenuRef : null}>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onSelectId(post.id);
+                                                                    setShowActions(!showActions);
+                                                                }}
+                                                                className="p-2 hover:bg-[#f2f2f0] rounded-lg transition-all text-[#9b9a97] hover:text-[#37352f]"
+                                                            >
+                                                                <MoreVertical size={18} />
+                                                            </button>
+                                                            {showActions && isCurrent && (
+                                                                <div className="absolute right-0 mt-2 w-36 bg-white border border-[#e9e9e8] rounded-xl z-20 py-1.5 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/5">
+                                                                    <button onClick={handleEdit} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#37352f] hover:bg-[#f7f7f5] transition-colors text-left font-medium">
+                                                                        <Edit3 size={14} className="text-[#9b9a97]" /> 수정하기
+                                                                    </button>
+                                                                    <button onClick={() => { onDeletePost(post.id); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[#eb5757] hover:bg-[#fff0f0] transition-colors text-left font-medium">
+                                                                        <Trash2 size={14} /> 삭제하기
+                                                                    </button>
                                                                 </div>
-                                                            );
-                                                        })()}
+                                                            )}
+                                                        </div>
                                                     </div>
 
-                                                    {/* Compact Comment Trigger or Section if Selected */}
+                                                    {/* 3. Body */}
+                                                    <div className="text-[16px] leading-[1.7] text-[#37352f] whitespace-pre-wrap font-sans">
+                                                        {displayBody}
+                                                    </div>
+
+                                                    {/* 4. Comments */}
                                                     <div className="pt-10 border-t border-[#f1f1f0] space-y-6">
                                                         <div className="flex items-center gap-2">
                                                             <MessageSquare size={16} className="text-[#9b9a97]" />
@@ -385,7 +360,7 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                                                         <button
                                                                             onClick={handleSubmitComment}
                                                                             disabled={!commentInput.trim()}
-                                                                            className="absolute right-2 top-1.5 p-2 bg-[#37352f] text-white rounded-lg disabled:opacity-20 shadow-sm"
+                                                                            className="absolute right-2 top-1.5 p-2 bg-[#37352f] text-white rounded-lg disabled:opacity-20"
                                                                         >
                                                                             <Send size={14} />
                                                                         </button>
@@ -394,7 +369,7 @@ const CommunityBoardView: React.FC<CommunityBoardViewProps> = ({
                                                             </div>
                                                         )}
                                                     </div>
-                                                </div>
+                                                </>
                                             )}
                                         </div>
                                     </article>

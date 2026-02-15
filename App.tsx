@@ -355,7 +355,8 @@ const App: React.FC = () => {
       setCurrentUser({
         id: session.user.id,
         email: session.user.email || '',
-        name: profile?.name || session.user.email?.split('@')[0],
+        name: profile?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+        avatar: session.user.user_metadata?.avatar_url || '',
         geminiApiKey: profile?.gemini_api_key || ''
       });
 
@@ -371,7 +372,8 @@ const App: React.FC = () => {
         setCurrentUser({
           id: session.user.id,
           email: session.user.email || '',
-          name: profile?.name || session.user.email?.split('@')[0],
+          name: profile?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          avatar: session.user.user_metadata?.avatar_url || '',
           geminiApiKey: profile?.gemini_api_key || ''
         });
 
@@ -1413,6 +1415,17 @@ const App: React.FC = () => {
 
   const updateAgents = (agents: AIAgent[]) => setAiAgents(agents);
 
+  const updateUser = async (updatedUser: User) => {
+    setCurrentUser(updatedUser);
+    saveToStorage('lifesync_user', updatedUser);
+    if (currentUser) {
+      await supabase.from('profiles').update({
+        name: updatedUser.name,
+        avatar_url: updatedUser.avatar
+      }).eq('id', updatedUser.id);
+    }
+  };
+
   const navItems: { id: ViewState; label: string; icon: React.ElementType }[] = [
     { id: 'chat', label: 'AI 채팅', icon: MessageCircle },
     { id: 'board', label: 'AI 일기장', icon: Sparkles },
@@ -1481,6 +1494,8 @@ const App: React.FC = () => {
             onUpdateAgents={updateAgents}
             settings={settings}
             onUpdateSettings={setSettings}
+            currentUser={currentUser}
+            onUpdateUser={updateUser}
             onExportData={handleExportData}
             onClearAllData={handleClearAllData}
             onClearActivity={handleClearActivity}
@@ -1570,8 +1585,27 @@ const App: React.FC = () => {
     mobileNavItems.find(i => i.id === currentView)?.label ||
     (currentView === 'settings' ? '설정' : 'Dashboard');
 
+  const handleNewChat = () => {
+    const newId = crypto.randomUUID();
+    const newSession: ChatSession = {
+      id: newId,
+      title: '새 대화',
+      messages: [],
+      createdAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString(),
+      agentId: activeChatAgentId
+    };
+    setChatSessions(prev => [newSession, ...prev]);
+    setActiveChatSessionId(newId);
+    setCurrentView('chat');
+  };
+
   const handleMobileNavigate = (view: ViewState) => {
-    setCurrentView(view);
+    if (view === 'chat') {
+      handleNewChat();
+    } else {
+      setCurrentView(view);
+    }
     setIsMobileMenuOpen(false);
   };
 
@@ -1596,7 +1630,7 @@ const App: React.FC = () => {
 
 
   return (
-    <div className="flex h-[100dvh] bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative">
+    <div className="flex h-[100dvh] bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative overflow-x-hidden">
       {/* Sidebar Navigation */}
       <aside className="hidden lg:flex w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
         <div>
@@ -1604,8 +1638,8 @@ const App: React.FC = () => {
           <button
             type="button"
             className="w-full p-4 lg:p-5 flex items-center gap-3 group hover:bg-[#efefef] transition-colors text-left"
-            onClick={() => setCurrentView('chat')}
-            aria-label="채팅으로 이동"
+            onClick={handleNewChat}
+            aria-label="새 채팅 시작"
           >
             <div className="w-8 h-8 bg-[#37352f] text-white rounded-[10px] flex items-center justify-center transition-transform group-hover:rotate-6">
               <Sparkles size={16} />
@@ -1617,7 +1651,7 @@ const App: React.FC = () => {
             {navItems.map(item => (
               <button
                 key={item.id}
-                onClick={() => setCurrentView(item.id)}
+                onClick={() => item.id === 'chat' ? handleNewChat() : setCurrentView(item.id)}
                 className={`
                   w-full flex items-center px-3 py-1.5 rounded-[4px] transition-colors group
                   ${currentView === item.id
@@ -1638,19 +1672,7 @@ const App: React.FC = () => {
                 <div className="flex items-center justify-between px-3 mb-2 group">
                   <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">채팅 기록</span>
                   <button
-                    onClick={() => {
-                      const newId = crypto.randomUUID();
-                      const newSession: ChatSession = {
-                        id: newId,
-                        title: '새 대화',
-                        messages: [],
-                        createdAt: new Date().toISOString(),
-                        lastMessageAt: new Date().toISOString(),
-                        agentId: activeChatAgentId
-                      };
-                      setChatSessions(prev => [newSession, ...prev]);
-                      setActiveChatSessionId(newId);
-                    }}
+                    onClick={handleNewChat}
                     className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
                   >
                     <Plus size={14} />
@@ -2003,21 +2025,17 @@ const App: React.FC = () => {
 
         {/* Bottom Section: Pro & Auth */}
         <div className="p-3 space-y-3">
-          <div className="bg-white border border-[#e9e9e8] rounded-lg p-3 shadow-sm hidden lg:block">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#2ecc71] to-[#3498db] flex-shrink-0"></div>
-              <span className="text-xs font-semibold text-[#37352f]">Pro Plan</span>
-            </div>
-            <p className="text-[11px] text-[#9b9a97] leading-tight">
-              AI 커뮤니티가 활성화되었습니다.
-            </p>
-          </div>
+
 
           {currentUser ? (
             <div className="bg-white border border-[#e9e9e8] rounded-lg p-2 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <div className="w-6 h-6 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[10px] font-bold text-[#37352f] flex-shrink-0">
-                  {currentUser?.name?.[0] || 'U'}
+              <div className="flex items-center gap-3 overflow-hidden">
+                <div className="w-8 h-8 rounded-full bg-[#f1f1f0] flex items-center justify-center text-xs font-bold text-[#37352f] flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
+                  {currentUser?.avatar ? (
+                    <img src={currentUser.avatar} alt={currentUser.name} className="w-full h-full object-cover" />
+                  ) : (
+                    currentUser?.name?.[0] || 'U'
+                  )}
                 </div>
                 <span className="text-xs font-bold text-[#37352f] truncate">{currentUser?.name}</span>
               </div>
@@ -2054,16 +2072,20 @@ const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="w-8 h-8 rounded-md border border-[#e9e9e8] bg-white flex items-center justify-center text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-[#787774] hover:text-[#37352f] transition-colors"
               aria-label="전체 메뉴 열기"
             >
-              <Menu size={16} />
+              <Menu size={20} />
             </button>
             <span className="text-[#37352f] truncate">{headerLabel}</span>
           </div>
           {currentUser ? (
-            <div className="w-7 h-7 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[11px] font-bold text-[#37352f]">
-              {currentUser?.name?.[0] || 'U'}
+            <div className="w-8 h-8 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[11px] font-bold text-[#37352f] overflow-hidden border border-[#e9e9e8]">
+              {currentUser?.avatar ? (
+                <img src={currentUser.avatar} alt={currentUser.name} className="w-full h-full object-cover" />
+              ) : (
+                currentUser?.name?.[0] || 'U'
+              )}
             </div>
           ) : (
             <button
@@ -2216,9 +2238,13 @@ const App: React.FC = () => {
             <div className="p-3 border-t border-[#e9e9e8]">
               {currentUser ? (
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <div className="w-7 h-7 rounded-full bg-[#f1f1f0] flex items-center justify-center text-[11px] font-bold text-[#37352f] flex-shrink-0">
-                      {currentUser?.name?.[0] || 'U'}
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="w-8 h-8 rounded-full bg-[#f1f1f0] flex items-center justify-center text-xs font-bold text-[#37352f] flex-shrink-0 overflow-hidden border border-[#e9e9e8]">
+                      {currentUser?.avatar ? (
+                        <img src={currentUser.avatar} alt={currentUser.name} className="w-full h-full object-cover" />
+                      ) : (
+                        currentUser?.name?.[0] || 'U'
+                      )}
                     </div>
                     <span className="text-xs font-semibold text-[#37352f] truncate">{currentUser?.name}</span>
                   </div>

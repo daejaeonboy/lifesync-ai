@@ -175,7 +175,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ events, tags, onAddEvent, o
           onWheel={handleWheel}
         >
           {/* Helper Header */}
-          <div className="h-14 flex items-center justify-between px-5 border-b border-[#e9e9e8] bg-white">
+          <div className="h-14 flex items-center justify-between px-4 sm:px-5 border-b border-[#e9e9e8] bg-white">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold tracking-tight tabular-nums">
                 {format(currentDate, 'yyyy년 M월', { locale: ko })}
@@ -303,18 +303,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({ events, tags, onAddEvent, o
 
         {/* Modern Modal Overlay */}
         {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4">
-            <div className="bg-white w-full max-w-[500px] rounded-xl shadow-2xl overflow-hidden text-[#37352f]">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[3px] p-4 transition-all animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-white w-full max-w-[480px] rounded-2xl shadow-2xl overflow-hidden text-[#37352f] flex flex-col max-h-[90vh]">
               {/* Modal Header */}
-              <div className="px-5 py-3 border-b border-[#e9e9e8] flex items-center justify-between bg-[#fbfbfa]">
-                <span className="text-sm font-medium text-[#787774]">
-                  {isEditing ? '일정 편집' : '새로운 일정'}
-                </span>
-                <div className="flex items-center gap-1">
+              <div className="px-6 py-4 flex items-center justify-between border-b border-[#f1f1f0]">
+                <h3 className="text-[15px] font-semibold text-[#787774]">
+                  {isEditing ? '일정 수정' : '새 일정'}
+                </h3>
+                <div className="flex items-center gap-1.5">
                   {isEditing && (
                     <button
                       onClick={handleDelete}
-                      className="text-[#eb5757] hover:bg-[#ffefef] p-1.5 rounded transition-colors"
+                      className="p-2 text-[#eb5757] hover:bg-[#ffefef] rounded-lg transition-colors"
                       title="삭제"
                     >
                       <Trash2 size={18} />
@@ -322,7 +322,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ events, tags, onAddEvent, o
                   )}
                   <button
                     onClick={() => setShowModal(false)}
-                    className="text-[#9b9a97] hover:text-[#37352f] hover:bg-[#efefef] p-1.5 rounded transition-colors"
+                    className="p-2 text-[#9b9a97] hover:text-[#37352f] hover:bg-[#f1f1f0] rounded-lg transition-colors"
                   >
                     <X size={20} />
                   </button>
@@ -330,285 +330,284 @@ const CalendarView: React.FC<CalendarViewProps> = ({ events, tags, onAddEvent, o
               </div>
 
               {/* Modal Body */}
-              <div className="p-6 space-y-5">
-                {/* Title Input */}
-                <div>
-                  <input
-                    type="text"
-                    placeholder="일정 제목"
-                    className="w-full text-xl font-bold placeholder-[#d3d1cb] border-none focus:ring-0 p-0 text-[#37352f] bg-transparent"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    autoFocus
-                  />
-                </div>
-
-                {/* Properties Grid */}
-                <div className="space-y-3 text-sm">
-
-                  {/* Date */}
-                  <div className="flex items-center h-8">
-                    <div className="w-24 text-[#787774] flex items-center gap-2">
-                      <CalendarIcon size={14} /> 날짜
-                    </div>
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                <div className="space-y-6">
+                  {/* Title Input */}
+                  <div className="relative group">
                     <input
-                      type="date"
-                      className="flex-1 bg-transparent border-none focus:ring-0 p-0 text-[#37352f] cursor-pointer hover:bg-[#efefef] rounded px-2 -ml-2"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
+                      type="text"
+                      placeholder="무엇을 하나요?"
+                      className="w-full text-2xl font-bold placeholder-[#d3d1cb] border-none focus:ring-0 p-0 text-[#37352f] bg-transparent selection:bg-[#2383e2]/20"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      autoFocus
                     />
+                    <div className="h-px w-full bg-[#f1f1f0] mt-2 group-focus-within:bg-[#2383e2] transition-colors" />
                   </div>
 
-                  {/* All Day Toggle */}
-                  <div className="flex items-center h-8">
-                    <div className="w-24 text-[#787774] flex items-center gap-2">
-                      <Clock size={14} /> 종일
-                    </div>
-                    <button
-                      onClick={() => setIsAllDay(!isAllDay)}
-                      className={`
-                      relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#2383e2] focus:ring-offset-1
-                      ${isAllDay ? 'bg-[#2383e2]' : 'bg-[#e9e9e8]'}
-                    `}
-                    >
-                      <span
-                        className={`
-                        inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform
-                        ${isAllDay ? 'translate-x-5' : 'translate-x-1'}
-                      `}
-                      />
-                    </button>
-                    <span className="ml-3 text-xs text-[#787774]">{isAllDay ? '기한 없음' : '정해진 시간'}</span>
-                  </div>
-
-                  {/* Time (Conditional) */}
-                  {!isAllDay && (
-                    <div className="flex items-center h-8 animate-[fadeIn_0.2s_ease-out]">
-                      <div className="w-24 text-[#787774] flex items-center gap-2">
-                        <Clock size={14} className="opacity-0" /> 시간
+                  {/* Properties Table-like Layout */}
+                  <div className="space-y-4">
+                    {/* Date */}
+                    <div className="flex items-center group">
+                      <div className="w-28 flex items-center gap-2.5 text-[#787774] text-[14px] font-medium shrink-0">
+                        <CalendarIcon size={16} className="text-[#9b9a97]" /> 날짜
                       </div>
-                      <div className="flex items-center gap-2 flex-1 relative">
-                        {/* Click-outside backdrop */}
-                        {(showStartHourPicker || showStartMinPicker || showEndHourPicker || showEndMinPicker) && (
-                          <div
-                            className="fixed inset-0 z-50 bg-transparent"
-                            onClick={() => {
-                              setShowStartHourPicker(false);
-                              setShowStartMinPicker(false);
-                              setShowEndHourPicker(false);
-                              setShowEndMinPicker(false);
-                            }}
-                          />
-                        )}
-
-                        {/* Start Time Group */}
-                        <div className="flex items-center gap-1 relative z-[60]">
-                          <button
-                            onClick={() => {
-                              const current = getAmPm(startTime);
-                              setStartTime(to24hTime(get12hTime(startTime), current === '오전' ? '오후' : '오전'));
-                            }}
-                            className="px-2 py-1 rounded text-[11px] bg-[#fbfbfa] border border-[#e9e9e8] text-[#787774] hover:bg-[#efefef] transition-colors font-medium"
-                          >
-                            {getAmPm(startTime)}
-                          </button>
-
-                          <div className="relative">
-                            <button
-                              onClick={() => {
-                                setShowStartHourPicker(!showStartHourPicker);
-                                setShowStartMinPicker(false);
-                                setShowEndHourPicker(false);
-                                setShowEndMinPicker(false);
-                              }}
-                              className="px-2 py-1 rounded bg-[#fbfbfa] border border-[#e9e9e8] text-[#37352f] hover:bg-[#efefef] min-w-[36px] text-center"
-                            >
-                              {get12hTime(startTime).split(':')[0]}시
-                            </button>
-                            {showStartHourPicker && (
-                              <div className="absolute top-full left-0 mt-1 w-16 max-h-48 overflow-y-auto bg-white border border-[#e9e9e8] rounded-md shadow-lg z-[60]">
-                                {hourOptions.map(h => (
-                                  <button
-                                    key={`sh-${h}`}
-                                    onClick={() => {
-                                      const [, m] = get12hTime(startTime).split(':');
-                                      setStartTime(to24hTime(`${String(h).padStart(2, '0')}:${m}`, getAmPm(startTime)));
-                                      setShowStartHourPicker(false);
-                                    }}
-                                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[#f7f7f5]"
-                                  >
-                                    {h}시
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="relative">
-                            <button
-                              onClick={() => {
-                                setShowStartMinPicker(!showStartMinPicker);
-                                setShowStartHourPicker(false);
-                                setShowEndHourPicker(false);
-                                setShowEndMinPicker(false);
-                              }}
-                              className="px-2 py-1 rounded bg-[#fbfbfa] border border-[#e9e9e8] text-[#37352f] hover:bg-[#efefef] min-w-[36px] text-center"
-                            >
-                              {startTime ? startTime.split(':')[1] : '00'}분
-                            </button>
-                            {showStartMinPicker && (
-                              <div className="absolute top-full left-0 mt-1 w-16 max-h-48 overflow-y-auto bg-white border border-[#e9e9e8] rounded-md shadow-lg z-[60]">
-                                {minuteOptions.map(m => (
-                                  <button
-                                    key={`sm-${m}`}
-                                    onClick={() => {
-                                      const h12 = get12hTime(startTime).split(':')[0];
-                                      setStartTime(to24hTime(`${h12}:${m}`, getAmPm(startTime)));
-                                      setShowStartMinPicker(false);
-                                    }}
-                                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[#f7f7f5]"
-                                  >
-                                    {m}분
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <span className="text-[#d3d1cb]">→</span>
-
-                        {/* End Time Group */}
-                        <div className="flex items-center gap-1 relative z-[60]">
-                          <button
-                            onClick={() => {
-                              const current = getAmPm(endTime);
-                              setEndTime(to24hTime(get12hTime(endTime), current === '오전' ? '오후' : '오전'));
-                            }}
-                            className="px-2 py-1 rounded text-[11px] bg-[#fbfbfa] border border-[#e9e9e8] text-[#787774] hover:bg-[#efefef] transition-colors font-medium"
-                          >
-                            {getAmPm(endTime)}
-                          </button>
-
-                          <div className="relative">
-                            <button
-                              onClick={() => {
-                                setShowEndHourPicker(!showEndHourPicker);
-                                setShowStartHourPicker(false);
-                                setShowStartMinPicker(false);
-                                setShowEndMinPicker(false);
-                              }}
-                              className="px-2 py-1 rounded bg-[#fbfbfa] border border-[#e9e9e8] text-[#37352f] hover:bg-[#efefef] min-w-[36px] text-center"
-                            >
-                              {get12hTime(endTime).split(':')[0]}시
-                            </button>
-                            {showEndHourPicker && (
-                              <div className="absolute top-full left-0 mt-1 w-16 max-h-48 overflow-y-auto bg-white border border-[#e9e9e8] rounded-md shadow-lg z-[60]">
-                                {hourOptions.map(h => (
-                                  <button
-                                    key={`eh-${h}`}
-                                    onClick={() => {
-                                      const [, m] = get12hTime(endTime).split(':');
-                                      setEndTime(to24hTime(`${String(h).padStart(2, '0')}:${m}`, getAmPm(endTime)));
-                                      setShowEndHourPicker(false);
-                                    }}
-                                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[#f7f7f5]"
-                                  >
-                                    {h}시
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="relative">
-                            <button
-                              onClick={() => {
-                                setShowEndMinPicker(!showEndMinPicker);
-                                setShowStartHourPicker(false);
-                                setShowStartMinPicker(false);
-                                setShowEndHourPicker(false);
-                              }}
-                              className="px-2 py-1 rounded bg-[#fbfbfa] border border-[#e9e9e8] text-[#37352f] hover:bg-[#efefef] min-w-[36px] text-center"
-                            >
-                              {endTime ? endTime.split(':')[1] : '00'}분
-                            </button>
-                            {showEndMinPicker && (
-                              <div className="absolute top-full left-0 mt-1 w-16 max-h-48 overflow-y-auto bg-white border border-[#e9e9e8] rounded-md shadow-lg z-[60]">
-                                {minuteOptions.map(m => (
-                                  <button
-                                    key={`em-${m}`}
-                                    onClick={() => {
-                                      const h12 = get12hTime(endTime).split(':')[0];
-                                      setEndTime(to24hTime(`${h12}:${m}`, getAmPm(endTime)));
-                                      setShowEndMinPicker(false);
-                                    }}
-                                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[#f7f7f5]"
-                                  >
-                                    {m}분
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                      <div className="flex-1 min-h-[36px] flex items-center">
+                        <input
+                          type="date"
+                          className="w-fit bg-transparent border-none focus:ring-0 p-1.5 -ml-1.5 text-[#37352f] text-[14px] cursor-pointer hover:bg-[#f1f1f0] rounded-lg transition-colors font-medium"
+                          value={date}
+                          onChange={(e) => setDate(e.target.value)}
+                        />
                       </div>
                     </div>
-                  )}
 
-                  {/* Type/Tag */}
-                  <div className="flex items-center h-8">
-                    <div className="w-24 text-[#787774] flex items-center gap-2">
-                      <Check size={14} /> 태그
-                    </div>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {tags.map(t => (
+                    {/* All Day Toggle */}
+                    <div className="flex items-center">
+                      <div className="w-28 flex items-center gap-2.5 text-[#787774] text-[14px] font-medium shrink-0">
+                        <Clock size={16} className="text-[#9b9a97]" /> 시간 설정
+                      </div>
+                      <div className="flex-1 flex items-center justify-between">
+                        <span className="text-[14px] text-[#37352f] font-medium">
+                          {isAllDay ? '하루 종일' : '직접 지정'}
+                        </span>
                         <button
-                          key={t.id}
-                          onClick={() => setType(t.id)}
+                          onClick={() => setIsAllDay(!isAllDay)}
                           className={`
-                           px-2 py-0.5 rounded text-xs transition-colors border flex items-center gap-1.5
-                           ${type === t.id
-                              ? 'bg-[#37352f] text-white border-[#37352f]'
-                              : 'bg-white text-[#787774] border-[#e9e9e8] hover:bg-[#efefef]'}
-                        `}
+                            relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-200 focus:outline-none
+                            ${isAllDay ? 'bg-[#2383e2]' : 'bg-[#e2e2e2]'}
+                          `}
                         >
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }} />
-                          {t.name}
+                          <span
+                            className={`
+                              inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow-md transition-all duration-200
+                              ${isAllDay ? 'translate-x-5.5' : 'translate-x-[3px]'}
+                            `}
+                          />
                         </button>
-                      ))}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Description */}
-                  <div className="flex items-start mt-2">
-                    <div className="w-24 text-[#787774] flex items-center gap-2 pt-1">
-                      <AlignLeft size={14} /> 메모
+                    {/* Time Selector (Conditional) */}
+                    {!isAllDay && (
+                      <div className="flex flex-col gap-3 animate-[fadeIn_0.2s_ease-out]">
+                        <div className="flex items-center">
+                          <div className="w-28 flex items-center gap-2.5 text-[#787774] text-[14px] font-medium shrink-0">
+                            <div className="w-4" /> 시작 시간
+                          </div>
+                          <div className="flex-1 flex items-center gap-2 relative">
+                            <div className="flex items-center bg-[#f1f1f0] rounded-lg p-0.5 border border-[#e2e2e2] relative z-[70]">
+                              <button
+                                onClick={() => {
+                                  const current = getAmPm(startTime);
+                                  setStartTime(to24hTime(get12hTime(startTime), current === '오전' ? '오후' : '오전'));
+                                }}
+                                className="px-2 py-1 text-[11px] font-bold text-[#37352f] hover:bg-white rounded-md transition-all uppercase"
+                              >
+                                {getAmPm(startTime)}
+                              </button>
+
+                              <div className="w-px h-3 bg-[#d3d1cb] mx-0.5" />
+
+                              <div className="relative">
+                                <button
+                                  onClick={() => setShowStartHourPicker(!showStartHourPicker)}
+                                  className="px-2 py-1 text-[14px] font-medium text-[#37352f] hover:bg-white rounded-md transition-all"
+                                >
+                                  {get12hTime(startTime).split(':')[0]}시
+                                </button>
+                                {showStartHourPicker && (
+                                  <div className="absolute top-full left-0 mt-2 w-20 max-h-48 overflow-y-auto bg-white border border-[#f1f1f0] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] z-[80] p-1 custom-scrollbar">
+                                    {hourOptions.map(h => (
+                                      <button
+                                        key={`sh-${h}`}
+                                        onClick={() => {
+                                          const [, m] = get12hTime(startTime).split(':');
+                                          setStartTime(to24hTime(`${String(h).padStart(2, '0')}:${m}`, getAmPm(startTime)));
+                                          setShowStartHourPicker(false);
+                                        }}
+                                        className="w-full px-3 py-2 text-center text-[13px] hover:bg-[#f7f7f5] rounded-lg transition-colors font-medium"
+                                      >
+                                        {h}시
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="relative">
+                                <button
+                                  onClick={() => setShowStartMinPicker(!showStartMinPicker)}
+                                  className="px-2 py-1 text-[14px] font-medium text-[#37352f] hover:bg-white rounded-md transition-all"
+                                >
+                                  {startTime ? startTime.split(':')[1] : '00'}분
+                                </button>
+                                {showStartMinPicker && (
+                                  <div className="absolute top-full left-0 mt-2 w-20 max-h-48 overflow-y-auto bg-white border border-[#f1f1f0] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] z-[80] p-1 custom-scrollbar">
+                                    {minuteOptions.map(m => (
+                                      <button
+                                        key={`sm-${m}`}
+                                        onClick={() => {
+                                          const h12 = get12hTime(startTime).split(':')[0];
+                                          setStartTime(to24hTime(`${h12}:${m}`, getAmPm(startTime)));
+                                          setShowStartMinPicker(false);
+                                        }}
+                                        className="w-full px-3 py-2 text-center text-[13px] hover:bg-[#f7f7f5] rounded-lg transition-colors font-medium"
+                                      >
+                                        {m}분
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* End Time Container */}
+                        <div className="flex items-center">
+                          <div className="w-28 flex items-center gap-2.5 text-[#787774] text-[14px] font-medium shrink-0">
+                            <div className="w-4" /> 종료 시간
+                          </div>
+                          <div className="flex-1 flex items-center gap-2 relative">
+                            <div className="flex items-center bg-[#f1f1f0] rounded-lg p-0.5 border border-[#e2e2e2] relative z-[60]">
+                              <button
+                                onClick={() => {
+                                  const current = getAmPm(endTime);
+                                  setEndTime(to24hTime(get12hTime(endTime), current === '오전' ? '오후' : '오전'));
+                                }}
+                                className="px-2 py-1 text-[11px] font-bold text-[#37352f] hover:bg-white rounded-md transition-all uppercase"
+                              >
+                                {getAmPm(endTime)}
+                              </button>
+
+                              <div className="w-px h-3 bg-[#d3d1cb] mx-0.5" />
+
+                              <div className="relative">
+                                <button
+                                  onClick={() => setShowEndHourPicker(!showEndHourPicker)}
+                                  className="px-2 py-1 text-[14px] font-medium text-[#37352f] hover:bg-white rounded-md transition-all"
+                                >
+                                  {get12hTime(endTime).split(':')[0]}시
+                                </button>
+                                {showEndHourPicker && (
+                                  <div className="absolute top-full left-0 mt-2 w-20 max-h-48 overflow-y-auto bg-white border border-[#f1f1f0] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] z-[70] p-1 custom-scrollbar">
+                                    {hourOptions.map(h => (
+                                      <button
+                                        key={`eh-${h}`}
+                                        onClick={() => {
+                                          const [, m] = get12hTime(endTime).split(':');
+                                          setEndTime(to24hTime(`${String(h).padStart(2, '0')}:${m}`, getAmPm(endTime)));
+                                          setShowEndHourPicker(false);
+                                        }}
+                                        className="w-full px-3 py-2 text-center text-[13px] hover:bg-[#f7f7f5] rounded-lg transition-colors font-medium"
+                                      >
+                                        {h}시
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="relative">
+                                <button
+                                  onClick={() => setShowEndMinPicker(!showEndMinPicker)}
+                                  className="px-2 py-1 text-[14px] font-medium text-[#37352f] hover:bg-white rounded-md transition-all"
+                                >
+                                  {endTime ? endTime.split(':')[1] : '00'}분
+                                </button>
+                                {showEndMinPicker && (
+                                  <div className="absolute top-full left-0 mt-2 w-20 max-h-48 overflow-y-auto bg-white border border-[#f1f1f0] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] z-[70] p-1 custom-scrollbar">
+                                    {minuteOptions.map(m => (
+                                      <button
+                                        key={`em-${m}`}
+                                        onClick={() => {
+                                          const h12 = get12hTime(endTime).split(':')[0];
+                                          setEndTime(to24hTime(`${h12}:${m}`, getAmPm(endTime)));
+                                          setShowEndMinPicker(false);
+                                        }}
+                                        className="w-full px-3 py-2 text-center text-[13px] hover:bg-[#f7f7f5] rounded-lg transition-colors font-medium"
+                                      >
+                                        {m}분
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tags */}
+                    <div className="flex items-start">
+                      <div className="w-28 flex items-center gap-2.5 text-[#787774] text-[14px] font-medium shrink-0 pt-1.5">
+                        <Check size={16} className="text-[#9b9a97]" /> 태그
+                      </div>
+                      <div className="flex-1 flex gap-2 flex-wrap">
+                        {tags.map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => setType(t.id)}
+                            className={`
+                              px-3 py-1.5 rounded-xl text-[13px] font-semibold transition-all flex items-center gap-2 border shadow-sm
+                              ${type === t.id
+                                ? 'bg-[#37352f] text-white border-[#37352f] scale-105'
+                                : 'bg-white text-[#787774] border-[#f1f1f0] hover:bg-[#f7f7f5]'}
+                            `}
+                          >
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: t.color }} />
+                            {t.name}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <textarea
-                      placeholder="내용을 입력하세요..."
-                      rows={4}
-                      className="flex-1 bg-[#fbfbfa] border border-[#e9e9e8] rounded p-2 text-sm focus:ring-1 focus:ring-[#d3d1cb] focus:border-[#d3d1cb] resize-none outline-none"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                    />
+
+                    {/* Memo */}
+                    <div className="flex flex-col gap-3 pt-2">
+                      <div className="flex items-center gap-2.5 text-[#787774] text-[14px] font-medium">
+                        <AlignLeft size={16} className="text-[#9b9a97]" /> 메모
+                      </div>
+                      <textarea
+                        placeholder="메모를 입력하세요..."
+                        rows={5}
+                        className="w-full bg-[#f7f7f5] border border-[#f1f1f0] rounded-2xl p-4 text-[14px] text-[#37352f] focus:bg-white focus:ring-2 focus:ring-[#2383e2]/10 focus:border-[#2383e2] transition-all resize-none outline-none leading-relaxed placeholder-[#b1b0ad]"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Modal Footer */}
-              <div className="p-3 bg-[#fbfbfa] border-t border-[#e9e9e8] flex justify-end items-center">
+              <div className="px-6 py-4 bg-[#fbfbfa] border-t border-[#f1f1f0] flex justify-end">
                 <button
                   onClick={handleSave}
-                  className="bg-[#2383e2] hover:bg-[#1d6fce] text-white px-4 py-1.5 rounded text-sm font-medium transition-colors shadow-sm"
+                  className="bg-[#2383e2] hover:bg-[#1d6fce] text-white px-8 py-2.5 rounded-xl text-[15px] font-bold transition-all shadow-md hover:shadow-lg active:scale-95"
                 >
-                  완료
+                  일정 저장
                 </button>
               </div>
             </div>
+
+            {/* Global backdrop for time pickers */}
+            {(showStartHourPicker || showStartMinPicker || showEndHourPicker || showEndMinPicker) && (
+              <div
+                className="fixed inset-0 z-[65] opacity-0"
+                onClick={() => {
+                  setShowStartHourPicker(false);
+                  setShowStartMinPicker(false);
+                  setShowEndHourPicker(false);
+                  setShowEndMinPicker(false);
+                }}
+              />
+            )}
           </div>
-        )}
-      </div>
+        )
+        }
+      </div >
     );
   } catch (error) {
     console.error("CalendarView render error:", error);
