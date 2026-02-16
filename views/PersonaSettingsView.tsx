@@ -1,39 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { AIAgent, AppSettings } from '../types';
-import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X } from 'lucide-react';
+import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X, Upload } from 'lucide-react';
 
-export const DEFAULT_AGENTS: AIAgent[] = [
-  {
-    id: 'ARIA',
-    name: 'LifeSync AI',
-    emoji: '🤖',
-    role: 'Personal Assistant',
-    personality: 'Friendly, helpful, and organized',
-    tone: 'Professional yet approachable',
-    color: '#4F46E5',
-    avatar: 'https://ui-avatars.com/api/?name=LifeSync+AI&background=4F46E5&color=fff',
-  },
-  {
-    id: 'COACH',
-    name: 'Productivity Coach',
-    emoji: '🚀',
-    role: 'Coach',
-    personality: 'Motivating, direct, and results-oriented',
-    tone: 'Energetic and encouraging',
-    color: '#10B981',
-    avatar: 'https://ui-avatars.com/api/?name=Productivity+Coach&background=10B981&color=fff',
-  },
-  {
-    id: 'EMPATH',
-    name: 'Mindfulness Guide',
-    emoji: '🌿',
-    role: 'Therapist',
-    personality: 'Empathetic, calm, and a good listener',
-    tone: 'Soothing and supportive',
-    color: '#F59E0B',
-    avatar: 'https://ui-avatars.com/api/?name=Mindfulness+Guide&background=F59E0B&color=fff',
-  },
-];
+import { DEFAULT_AGENTS } from '../data/defaultAgents';
 
 interface PersonaSettingsViewProps {
   agents: AIAgent[];
@@ -103,6 +72,24 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
   const resetAgents = () => {
     if (!window.confirm('기본 페르소나로 초기화할까요?')) return;
     onUpdateAgents(DEFAULT_AGENTS);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('파일 크기가 너무 큽니다 (최대 5MB)');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        callback(event.target.result as string);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -223,93 +210,104 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
       </div>
 
       {editingId && draft && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-white rounded-2xl border border-[#e9e9e8] shadow-xl">
-            <div className="px-5 py-4 border-b border-[#efefef] flex items-center justify-between">
-              <h4 className="text-[#37352f]">{editingTarget ? '페르소나 편집' : '새 페르소나'}</h4>
-              <button onClick={closeEditor} className="p-1 rounded-md hover:bg-[#f2f2f0] text-[#787774]">
-                <X size={16} />
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="w-full h-full sm:h-auto sm:max-w-xl bg-white sm:rounded-2xl border-x sm:border border-[#e9e9e8] shadow-2xl max-h-none sm:max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#efefef] flex items-center justify-between shrink-0 bg-white">
+              <h4 className="text-[#37352f] font-semibold">{editingTarget ? '페르소나 편집' : '새 페르소나'}</h4>
+              <button onClick={closeEditor} className="p-1.5 rounded-md hover:bg-[#f2f2f0] text-[#787774] transition-colors">
+                <X size={18} />
               </button>
             </div>
-            <div className="p-6 flex flex-col items-center border-b border-[#efefef] bg-[#fbfbfa]">
-              <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center text-4xl text-white shadow-inner mb-2" style={{ backgroundColor: draft.color || '#37352f' }}>
-                {draft.avatar ? (
-                  <img src={draft.avatar} alt={draft.name} className="w-full h-full object-cover" />
-                ) : (
-                  <span>{draft.emoji || '🤖'}</span>
-                )}
+
+            <div className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
+              <div className="p-6 flex flex-col items-center border-b border-[#efefef] bg-[#fbfbfa]">
+                <div className="w-20 h-20 rounded-full overflow-hidden flex items-center justify-center text-4xl text-white shadow-md mb-3" style={{ backgroundColor: draft.color || '#37352f' }}>
+                  {draft.avatar ? (
+                    <img src={draft.avatar} alt={draft.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{draft.emoji || '🤖'}</span>
+                  )}
+                </div>
+                <div className="text-sm font-bold text-[#37352f]">{draft.name || '새 페르소나'}</div>
+                <div className="text-xs text-[#9b9a97]">{draft.role || '역할을 입력하세요'}</div>
               </div>
-              <div className="text-sm font-semibold text-[#37352f]">{draft.name || '새 페르소나'}</div>
-              <div className="text-xs text-[#9b9a97]">{draft.role || '역할을 입력하세요'}</div>
-            </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="text-xs text-[#787774] md:col-span-2">
-                이름
-                <input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                />
-              </label>
-              <label className="text-xs text-[#787774]">
-                역할
-                <input
-                  value={draft.role}
-                  onChange={(e) => setDraft({ ...draft, role: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                />
-              </label>
-              <label className="text-xs text-[#787774]">
-                톤
-                <input
-                  value={draft.tone}
-                  onChange={(e) => setDraft({ ...draft, tone: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                />
-              </label>
-              <label className="text-xs text-[#787774] md:col-span-2">
-                성격
-                <textarea
-                  value={draft.personality}
-                  onChange={(e) => setDraft({ ...draft, personality: e.target.value })}
-                  rows={3}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f] resize-none"
-                />
-              </label>
-              <div className="text-xs text-[#787774] md:col-span-2">
-                아바타 이미지
-                <div className="mt-1 flex flex-col sm:flex-row gap-2">
+
+              <div className="p-5 space-y-4">
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">이름</span>
                   <input
-                    value={draft.avatar || ''}
-                    onChange={(e) => setDraft({ ...draft, avatar: e.target.value })}
-                    className="flex-1 px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm outline-none focus:border-[#37352f]"
-                    placeholder="이미지 URL"
+                    value={draft.name}
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] focus:ring-1 focus:ring-[#37352f] transition-all outline-none"
                   />
-                  <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-[#dcdcd9] rounded-lg hover:bg-[#f7f7f5] cursor-pointer text-[#37352f] shadow-sm w-full sm:w-auto">
-                    <Upload size={14} />
-                    <span className="font-bold">파일</span>
+                </label>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">역할</span>
                     <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => handleImageUpload(e, (url) => setDraft({ ...draft, avatar: url }))}
+                      value={draft.role}
+                      onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] focus:ring-1 focus:ring-[#37352f] transition-all outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">톤</span>
+                    <input
+                      value={draft.tone}
+                      onChange={(e) => setDraft({ ...draft, tone: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] focus:ring-1 focus:ring-[#37352f] transition-all outline-none"
                     />
                   </label>
                 </div>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">성격</span>
+                  <textarea
+                    value={draft.personality}
+                    onChange={(e) => setDraft({ ...draft, personality: e.target.value })}
+                    rows={3}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] focus:ring-1 focus:ring-[#37352f] transition-all outline-none resize-none"
+                  />
+                </label>
+
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">아바타 이미지</span>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={draft.avatar || ''}
+                      onChange={(e) => setDraft({ ...draft, avatar: e.target.value })}
+                      className="flex-1 px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] outline-none"
+                      placeholder="이미지 URL"
+                    />
+                    <label className="flex items-center justify-center gap-1.5 px-4 py-2 bg-white border border-[#dcdcd9] rounded-lg hover:bg-[#f7f7f5] cursor-pointer text-[#37352f] text-sm transition-colors whitespace-nowrap">
+                      <Upload size={14} />
+                      <span className="font-semibold">파일 선택</span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, (url) => setDraft({ ...draft, avatar: url }))}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="px-5 py-4 border-t border-[#efefef] flex justify-end gap-2">
+
+            <div className="px-5 py-4 border-t border-[#efefef] flex justify-end gap-2 shrink-0 bg-white">
               <button
                 onClick={closeEditor}
-                className="px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
+                className="px-4 py-2 rounded-lg border border-[#dcdcd9] text-sm text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
               >
                 취소
               </button>
               <button
                 onClick={saveAgent}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-sm text-white hover:bg-[#2b2924]"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#37352f] text-sm text-white hover:bg-[#2b2924] transition-all active:scale-95 shadow-sm"
               >
-                <Save size={14} /> 저장
+                <Save size={16} />
+                <span>저장하기</span>
               </button>
             </div>
           </div>

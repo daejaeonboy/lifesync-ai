@@ -1,4 +1,5 @@
 import { ApiUsageStats } from '../types';
+import { DEFAULT_GEMINI_MODEL, normalizeGeminiModelName } from './aiConfig';
 
 /**
  * Interface for Gemini API Response
@@ -14,6 +15,11 @@ interface GeminiResponse {
     }[];
 }
 
+interface GeminiCallOptions {
+    temperature?: number;
+    maxOutputTokens?: number;
+}
+
 /**
  * Call the Google Gemini API to generate content.
  * Note: In a production app, this should ideally go through a backend to protect the API Key.
@@ -22,13 +28,15 @@ export const callGeminiAPI = async (
     apiKey: string,
     prompt: string,
     updateUsage?: (stats: ApiUsageStats) => void,
-    modelName: string = 'gemini-1.5-flash'
+    modelName: string = DEFAULT_GEMINI_MODEL,
+    options?: GeminiCallOptions
 ): Promise<string> => {
     if (!apiKey) {
-        throw new Error('API Key가 필요합니다.');
+        throw new Error('API Key揶쎛 ?袁⑹뒄??몃빍??');
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const normalizedModelName = normalizeGeminiModelName(modelName);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${normalizedModelName}:generateContent?key=${apiKey}`;
 
     try {
         const response = await fetch(url, {
@@ -43,15 +51,15 @@ export const callGeminiAPI = async (
                     },
                 ],
                 generationConfig: {
-                    temperature: 0.7,
-                    maxOutputTokens: 4096,
+                    temperature: options?.temperature ?? 0.5,
+                    maxOutputTokens: options?.maxOutputTokens ?? 768,
                 }
             }),
         });
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'API 호출 중 오류가 발생했습니다.');
+            throw new Error(errorData.error?.message || 'API ?紐꾪뀱 餓???살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.');
         }
 
         const data: GeminiResponse = await response.json();
@@ -62,7 +70,7 @@ export const callGeminiAPI = async (
             .trim();
 
         if (!text) {
-            throw new Error('응답 데이터를 파싱할 수 없습니다.');
+            throw new Error('?臾먮뼗 ?怨쀬뵠?怨? ???뼓??????곷뮸??덈뼄.');
         }
 
         // Update usage stats if callback provided
@@ -92,20 +100,22 @@ export const createAgentPrompt = (
     userAction: string
 ): string => {
     return `
-당신은 "${persona.name}"라는 이름의 AI 동료입니다.
-나의 역할: ${persona.role}
-나의 성격: ${persona.personality}
-말투 및 톤: ${persona.tone}
+You are "${persona.name}".
+Role: ${persona.role}
+Personality: ${persona.personality}
+Tone: ${persona.tone}
 
-현재 상황(문맥):
+Context:
 ${context}
 
-사용자의 행동:
+User action:
 ${userAction}
 
-위 정보를 바탕으로 사용자에게 줄 짧은 코멘트나 반응을 작성해 주세요. 
-반드시 당신의 성격과 페르소나를 유지해야 하며, 한국어로 자연스럽게 말해야 합니다. 
-마크다운 형식을 사용할 수 있습니다.
-답변은 너무 길지 않게 2~4문장 정도로 작성해 주세요.
+Write a Korean response that sounds natural and empathetic.
+Always call the user "\uC8FC\uC778\uB2D8".
+Do not call the user by name, "\uC0AC\uC6A9\uC790", "\uB108", or "\uB2F9\uC2E0".
+Length target: 5-8 sentences (roughly 220-420 Korean characters).
+Use short line breaks to improve readability.
+Do not use markdown headings, tables, or code blocks.
 `;
 };

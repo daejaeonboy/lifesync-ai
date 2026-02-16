@@ -1,6 +1,6 @@
 import { AppSettings, ApiConnection } from '../types';
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
 export interface GeminiModelOption {
     id: string;
@@ -8,6 +8,8 @@ export interface GeminiModelOption {
 }
 
 export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
+    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
     { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
     { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
@@ -15,6 +17,19 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
     { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
 ];
+
+const GEMINI_MODEL_ALIASES: Record<string, string> = {
+    'gemini-3.0-pro': 'gemini-3-pro-preview',
+    'gemini-3.0-flash': 'gemini-3-flash-preview',
+    'gemini-3-pro': 'gemini-3-pro-preview',
+    'gemini-3-flash': 'gemini-3-flash-preview',
+};
+
+export const normalizeGeminiModelName = (modelName?: string): string => {
+    const normalized = (modelName || '').trim().toLowerCase();
+    if (!normalized) return DEFAULT_GEMINI_MODEL;
+    return GEMINI_MODEL_ALIASES[normalized] || normalized;
+};
 
 export interface ActiveGeminiConfig {
     connectionId?: string;
@@ -41,7 +56,7 @@ export const getActiveGeminiConfig = (settings: AppSettings): ActiveGeminiConfig
         return {
             connectionId: selected.id,
             apiKey: selected.apiKey,
-            modelName: selected.modelName?.trim() || DEFAULT_GEMINI_MODEL,
+            modelName: normalizeGeminiModelName(selected.modelName),
         };
     }
 
@@ -53,7 +68,7 @@ export const getActiveGeminiConfig = (settings: AppSettings): ActiveGeminiConfig
         return {
             connectionId: firstActiveGemini.id,
             apiKey: firstActiveGemini.apiKey,
-            modelName: firstActiveGemini.modelName?.trim() || DEFAULT_GEMINI_MODEL,
+            modelName: normalizeGeminiModelName(firstActiveGemini.modelName),
         };
     }
 

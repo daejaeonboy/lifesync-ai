@@ -1,103 +1,239 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CalendarEvent, JournalEntry, Todo, AiPost, AIAgent, ChatMode } from "../types";
+import { DEFAULT_GEMINI_MODEL, normalizeGeminiModelName } from "../utils/aiConfig";
 
 const RELAXED_SAFETY_SETTINGS = [
-  { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
-  { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
-  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
-  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any },
-  { category: 'HARM_CATEGORY_CIVIC_INTEGRITY' as any, threshold: 'BLOCK_NONE' as any },
+  { category: "HARM_CATEGORY_HARASSMENT" as any, threshold: "BLOCK_NONE" as any },
+  { category: "HARM_CATEGORY_HATE_SPEECH" as any, threshold: "BLOCK_NONE" as any },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT" as any, threshold: "BLOCK_NONE" as any },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT" as any, threshold: "BLOCK_NONE" as any },
+  { category: "HARM_CATEGORY_CIVIC_INTEGRITY" as any, threshold: "BLOCK_NONE" as any },
 ];
+
+const CHAT_HISTORY_LIMIT = 12;
+const MODEL_MESSAGE_CHAR_LIMIT = 600;
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const TODO_CATEGORIES = new Set(["personal", "work", "health", "shopping"]);
+const JOURNAL_MOODS = new Set(["good", "neutral", "bad"]);
+
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const sanitizeAssistantReply = (reply: string, agentName?: string): string => {
+  const trimmed = (reply || "").trim();
+  if (!trimmed) return "";
+
+  const tagMatch = trimmed.match(/^\[([^\]\n]{1,24})\]\s*/);
+  let result = trimmed;
+  if (tagMatch) {
+    const tag = (tagMatch[1] || "").trim().toLowerCase();
+    const normalizedAgentName = (agentName || "").trim().toLowerCase();
+    const isGenericTag = /^(ai|assistant|어시스턴트|챗봇|bot)$/i.test(tag);
+    const isSelfNameTag =
+      normalizedAgentName.length > 0 &&
+      (tag === normalizedAgentName || tag === `${normalizedAgentName}님` || tag.includes(normalizedAgentName));
+
+    if (isGenericTag || isSelfNameTag) {
+      result = result.slice(tagMatch[0].length).trimStart();
+    }
+  }
+
+  if (agentName) {
+    const escapedName = escapeRegex(agentName.trim());
+    if (escapedName) {
+      result = result.replace(new RegExp(`^${escapedName}\\s*[:：]\\s*`, "i"), "").trimStart();
+    }
+  }
+
+  return result || trimmed;
+};
+
+const truncateForModel = (text: string, maxChars: number): string => {
+  const normalized = (text || "").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars)}...`;
+};
+
+const toModelContents = (
+  messageHistory: { role: "user" | "assistant"; content: string }[],
+  maxMessages: number,
+  maxChars: number
+) =>
+  messageHistory.slice(-maxMessages).map((msg) => ({
+    role: msg.role === "user" ? "user" : "model",
+    parts: [{ text: truncateForModel(msg.content, maxChars) }],
+  }));
+
+const toDateOnly = (date: Date): string => date.toISOString().split("T")[0];
+
+const addDays = (date: Date, days: number): Date => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const normalizeDateString = (rawValue: unknown, baseDate: Date): string | undefined => {
+  if (typeof rawValue !== "string") return undefined;
+  const value = rawValue.trim();
+  if (!value) return undefined;
+
+  if (DATE_ONLY_PATTERN.test(value)) {
+    const parsed = new Date(`${value}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())) return value;
+  }
+
+  const lowered = value.toLowerCase();
+  if (lowered === "today" || value === "\uC624\uB298") return toDateOnly(baseDate);
+  if (lowered === "tomorrow" || value === "\uB0B4\uC77C") return toDateOnly(addDays(baseDate, 1));
+  if (lowered === "day after tomorrow" || value === "\uBAA8\uB808") return toDateOnly(addDays(baseDate, 2));
+  if (lowered === "next week" || value === "\uB2E4\uC74C\uC8FC" || value === "\uB2E4\uC74C \uC8FC") return toDateOnly(addDays(baseDate, 7));
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return toDateOnly(parsed);
+  return undefined;
+};
+
+const normalizeTimeString = (rawValue: unknown): string | undefined => {
+  if (typeof rawValue !== "string") return undefined;
+  const value = rawValue.trim();
+  if (!value) return undefined;
+
+  if (TIME_PATTERN.test(value)) return value;
+
+  const numericHourOnly = value.match(/^(\d{1,2})$/);
+  if (numericHourOnly) {
+    const hour = Number(numericHourOnly[1]);
+    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, "0")}:00`;
+  }
+
+  const koreanTime = value.match(/(\uC624\uC804|\uC624\uD6C4)?\s*(\d{1,2})\s*\uC2DC(?:\s*(\d{1,2})\s*\uBD84)?/);
+  if (koreanTime) {
+    let hour = Number(koreanTime[2]);
+    const minute = Number(koreanTime[3] ?? "0");
+    if (minute < 0 || minute > 59) return undefined;
+    if (koreanTime[1] === "\uC624\uD6C4" && hour < 12) hour += 12;
+    if (koreanTime[1] === "\uC624\uC804" && hour === 12) hour = 0;
+    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+
+  const amPmTime = value.match(/(am|pm)\s*(\d{1,2})(?::(\d{1,2}))?/i);
+  if (amPmTime) {
+    const marker = amPmTime[1].toLowerCase();
+    let hour = Number(amPmTime[2]);
+    const minute = Number(amPmTime[3] ?? "0");
+    if (minute < 0 || minute > 59) return undefined;
+    if (marker === "pm" && hour < 12) hour += 12;
+    if (marker === "am" && hour === 12) hour = 0;
+    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+
+  return undefined;
+};
+
+const inferDateFromText = (text: string, baseDate: Date): string | undefined => {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("\uB0B4\uC77C") || normalized.includes("tomorrow")) return toDateOnly(addDays(baseDate, 1));
+  if (normalized.includes("\uBAA8\uB808") || normalized.includes("day after tomorrow")) return toDateOnly(addDays(baseDate, 2));
+  if (normalized.includes("\uB2E4\uC74C\uC8FC") || normalized.includes("\uB2E4\uC74C \uC8FC") || normalized.includes("next week")) return toDateOnly(addDays(baseDate, 7));
+  if (normalized.includes("\uC624\uB298") || normalized.includes("today")) return toDateOnly(baseDate);
+
+  const isoDate = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoDate) return normalizeDateString(isoDate[1], baseDate);
+  return undefined;
+};
+
+const inferTimeFromText = (text: string): string | undefined => {
+  const hhmm = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (hhmm) return `${hhmm[1].padStart(2, "0")}:${hhmm[2]}`;
+
+  const koreanTime = text.match(/(\uC624\uC804|\uC624\uD6C4)?\s*(\d{1,2})\s*\uC2DC(?:\s*(\d{1,2})\s*\uBD84)?/);
+  if (koreanTime) {
+    return normalizeTimeString(`${koreanTime[1] ?? ""} ${koreanTime[2]}\uC2DC${koreanTime[3] ? `${koreanTime[3]}\uBD84` : ""}`.trim());
+  }
+
+  return undefined;
+};
 
 export const generateLifeInsight = async (
   apiKey: string,
   events: CalendarEvent[],
   todos: Todo[],
   journalEntries: JournalEntry[],
-  modelName: string = 'gemini-1.5-flash'
+  modelName: string = DEFAULT_GEMINI_MODEL
 ): Promise<AiPost> => {
   if (!apiKey) {
-    throw new Error("API Key가 설정되지 않았습니다. 설정 > AI 페르소나 설정에서 키를 입력해주세요.");
+    throw new Error("API Key is required.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split("T")[0];
 
-  // Prepare data context
   const contextData = {
     currentDate: today,
     recentEvents: events.slice(0, 10),
-    pendingTasks: todos.filter(t => !t.completed),
-    completedTasks: todos.filter(t => t.completed).slice(0, 10),
-    recentJournal: journalEntries.slice(0, 5)
+    pendingTasks: todos.filter((t) => !t.completed).slice(0, 20),
+    completedTasks: todos.filter((t) => t.completed).slice(0, 10),
+    recentJournal: journalEntries.slice(0, 5),
   };
 
   const prompt = `
-    당신은 사용자의 "LifeSync" AI 비서입니다. 
-    사용자의 캘린더 일정, 투두 리스트(할 일), 일기장을 분석하여 
-    사용자의 현재 삶에 대한 통찰력이 담긴 "게시판 글"을 작성해주세요.
+You are the LifeSync analysis assistant.
+Write in Korean.
+When you mention the user, always call them "\\uC8FC\\uC778\\uB2D8".
+Do not use other labels such as "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
 
-    다음 데이터를 분석하세요:
-    ${JSON.stringify(contextData, null, 2)}
+Analyze this context:
+${JSON.stringify(contextData, null, 2)}
 
-    작성 가이드라인:
-    1. 어조: 따뜻하고 격려하며, 때로는 분석적인 태도를 취하세요.
-    2. 제목: 글의 내용을 잘 요약하는 매력적인 제목을 지으세요.
-    3. 내용: 
-       - 최근 성취(완료된 일)를 칭찬하세요.
-       - 일기 내용을 바탕으로 감정 상태를 공감하거나 조언하세요.
-       - 다가오는 일정이나 미완료 과제에 대한 부드러운 리마인드를 제공하세요.
-       - 전체적인 "삶의 균형" 점수를 텍스트로 매겨주세요.
-    4. 형식: 일반 산문으로 작성하되, **최대한 한 문단으로 작성하고 길어도 두 문단을 넘기지 마세요.**
-       - 마크다운 문법(헤더, 볼드, 리스트, 코드블록)을 사용하지 마세요.
-    5. 언어: 한국어(Korean)
+Output JSON with:
+- title: short but compelling
+- content: practical and readable analysis
+- tags: array of short tags
+`;
 
-    결과는 JSON 형식으로 반환해야 합니다.
-  `;
   try {
     const response = await ai.models.generateContent({
-      model: modelName,
+      model: normalizeGeminiModelName(modelName),
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        generationConfig: {
+          temperature: 0.5,
+          maxOutputTokens: 900,
+        },
         safetySettings: RELAXED_SAFETY_SETTINGS,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             title: { type: Type.STRING },
             content: { type: Type.STRING },
-            tags: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ["title", "content", "tags"]
-        }
-      }
+          required: ["title", "content", "tags"],
+        },
+      },
     });
 
-    const text = response.text || "";
-    const result = JSON.parse(text);
-
+    const parsed = JSON.parse(response.text || "{}");
     return {
       id: crypto.randomUUID(),
-      title: result.title,
-      content: result.content,
-      tags: result.tags || ['Insight', 'Daily'],
+      title: parsed.title || "오늘의 인사이트",
+      content: parsed.content || "분석 결과를 생성하지 못했습니다.",
+      tags: Array.isArray(parsed.tags) ? parsed.tags : ["Insight", "Daily"],
       date: new Date().toISOString(),
-      type: 'analysis'
+      type: "analysis",
     };
   } catch (error) {
     console.error("Gemini generation failed:", error);
-    throw new Error("AI 분석 글을 생성하는 데 실패했습니다.");
+    throw new Error("AI insight generation failed.");
   }
-
 };
 
 export interface ChatActionResult {
   reply: string;
   action: {
-    type: 'add_event' | 'delete_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'none';
+    type: "add_event" | "delete_event" | "add_todo" | "add_journal" | "generate_insight" | "none";
     event?: {
       title: string;
       date: string;
@@ -124,418 +260,166 @@ export interface ChatActionResult {
   };
 }
 
-const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-const TODO_CATEGORIES = new Set(['personal', 'work', 'health', 'shopping']);
-const JOURNAL_MOODS = new Set(['good', 'neutral', 'bad']);
-
-const toDateOnly = (date: Date): string => date.toISOString().split('T')[0];
-
-const addDays = (date: Date, days: number): Date => {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-};
-
-const normalizeDateString = (rawValue: unknown, baseDate: Date): string | undefined => {
-  if (typeof rawValue !== 'string') return undefined;
-  const value = rawValue.trim();
-  if (!value) return undefined;
-
-  if (DATE_ONLY_PATTERN.test(value)) {
-    const parsed = new Date(`${value}T00:00:00`);
-    if (!Number.isNaN(parsed.getTime())) return value;
-  }
-
-  const lowered = value.toLowerCase();
-  if (lowered === 'today' || value === '오늘') return toDateOnly(baseDate);
-  if (lowered === 'tomorrow' || value === '내일') return toDateOnly(addDays(baseDate, 1));
-  if (lowered === 'day after tomorrow' || value === '모레') return toDateOnly(addDays(baseDate, 2));
-  if (lowered === 'next week' || value === '다음주' || value === '다음 주') return toDateOnly(addDays(baseDate, 7));
-
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) return toDateOnly(parsed);
-  return undefined;
-};
-
-const normalizeTimeString = (rawValue: unknown): string | undefined => {
-  if (typeof rawValue !== 'string') return undefined;
-  const value = rawValue.trim();
-  if (!value) return undefined;
-
-  if (TIME_PATTERN.test(value)) return value;
-
-  const numericHourOnly = value.match(/^(\d{1,2})$/);
-  if (numericHourOnly) {
-    const hour = Number(numericHourOnly[1]);
-    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, '0')}:00`;
-  }
-
-  const koreanTime = value.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/);
-  if (koreanTime) {
-    let hour = Number(koreanTime[2]);
-    const minute = Number(koreanTime[3] ?? '0');
-    if (minute < 0 || minute > 59) return undefined;
-    if (koreanTime[1] === '오후' && hour < 12) hour += 12;
-    if (koreanTime[1] === '오전' && hour === 12) hour = 0;
-    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  }
-
-  const amPmTime = value.match(/(am|pm)\s*(\d{1,2})(?::(\d{1,2}))?/i);
-  if (amPmTime) {
-    const marker = amPmTime[1].toLowerCase();
-    let hour = Number(amPmTime[2]);
-    const minute = Number(amPmTime[3] ?? '0');
-    if (minute < 0 || minute > 59) return undefined;
-    if (marker === 'pm' && hour < 12) hour += 12;
-    if (marker === 'am' && hour === 12) hour = 0;
-    if (hour >= 0 && hour <= 23) return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  }
-
-  return undefined;
-};
-
-const inferDateFromText = (text: string, baseDate: Date): string | undefined => {
-  const normalized = text.toLowerCase();
-  if (normalized.includes('내일') || normalized.includes('tomorrow')) return toDateOnly(addDays(baseDate, 1));
-  if (normalized.includes('모레') || normalized.includes('day after tomorrow')) return toDateOnly(addDays(baseDate, 2));
-  if (normalized.includes('다음주') || normalized.includes('다음 주') || normalized.includes('next week')) return toDateOnly(addDays(baseDate, 7));
-  if (normalized.includes('오늘') || normalized.includes('today')) return toDateOnly(baseDate);
-
-  const isoDate = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
-  if (isoDate) return normalizeDateString(isoDate[1], baseDate);
-  return undefined;
-};
-
-const inferTimeFromText = (text: string): string | undefined => {
-  const hhmm = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-  if (hhmm) return `${hhmm[1].padStart(2, '0')}:${hhmm[2]}`;
-
-  const koreanTime = text.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/);
-  if (koreanTime) {
-    return normalizeTimeString(`${koreanTime[1] ?? ''} ${koreanTime[2]}시 ${koreanTime[3] ? `${koreanTime[3]}분` : ''}`.trim());
-  }
-
-  return undefined;
-};
-
-const sanitizeAction = (
-  rawAction: ChatActionResult['action'] | undefined,
-  latestUserText: string,
-  baseDate: Date
-): ChatActionResult['action'] => {
-  if (!rawAction || typeof rawAction.type !== 'string') return { type: 'none' };
-
-  const actionType = rawAction.type;
-  if (actionType === 'add_event') {
-    const event = rawAction.event;
-    const title = typeof event?.title === 'string' && event.title.trim()
-      ? event.title.trim()
-      : (latestUserText.trim().slice(0, 60) || 'New event');
-    const date =
-      normalizeDateString(event?.date, baseDate) ??
-      inferDateFromText(latestUserText, baseDate) ??
-      toDateOnly(baseDate);
-    const startTime = normalizeTimeString(event?.startTime) ?? inferTimeFromText(latestUserText);
-    const endTime = normalizeTimeString(event?.endTime);
-    const type = typeof event?.type === 'string' && event.type.trim() ? event.type.trim() : 'tag_1';
-
-    return {
-      type: 'add_event',
-      event: {
-        title,
-        date,
-        startTime,
-        endTime,
-        type,
-      },
-    };
-  }
-
-  if (actionType === 'delete_event') {
-    const target = rawAction.deleteEvent;
-    const id = typeof target?.id === 'string' && target.id.trim() ? target.id.trim() : undefined;
-    const title = typeof target?.title === 'string' && target.title.trim() ? target.title.trim() : undefined;
-    const date = normalizeDateString(target?.date, baseDate) ?? inferDateFromText(latestUserText, baseDate);
-    const startTime = normalizeTimeString(target?.startTime) ?? inferTimeFromText(latestUserText);
-
-    if (!id && !title && !date) return { type: 'none' };
-    return {
-      type: 'delete_event',
-      deleteEvent: {
-        id,
-        title,
-        date,
-        startTime,
-      },
-    };
-  }
-
-  if (actionType === 'add_todo') {
-    const todo = rawAction.todo;
-    if (!todo?.text || typeof todo.text !== 'string') return { type: 'none' };
-    const category = TODO_CATEGORIES.has(todo.category || '') ? todo.category : 'personal';
-    const dueDate = normalizeDateString(todo.dueDate, baseDate);
-    return {
-      type: 'add_todo',
-      todo: {
-        text: todo.text.trim(),
-        category,
-        dueDate,
-      },
-    };
-  }
-
-  if (actionType === 'add_journal') {
-    const journal = rawAction.journal;
-    if (!journal?.content || typeof journal.content !== 'string') return { type: 'none' };
-    const title = typeof journal.title === 'string' && journal.title.trim()
-      ? journal.title.trim()
-      : journal.content.trim().slice(0, 24) || 'Chat memo';
-    const mood = JOURNAL_MOODS.has(journal.mood || '') ? journal.mood : 'neutral';
-    return {
-      type: 'add_journal',
-      journal: {
-        title,
-        content: journal.content.trim(),
-        mood,
-      },
-    };
-  }
-
-  if (actionType === 'generate_insight') return { type: 'generate_insight' };
-  return { type: 'none' };
-};
-
-export const detectChatAction = async (
-  apiKey: string,
-  messageHistory: { role: 'user' | 'assistant'; content: string }[],
-  events: CalendarEvent[],
-  userName: string,
-  modelName: string = 'gemini-1.5-flash'
-): Promise<ChatActionResult['action']> => {
-  if (!apiKey) return { type: 'none' };
-
-  const ai = new GoogleGenAI({ apiKey });
-  const now = new Date();
-  const today = toDateOnly(now);
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const latestUserText = [...messageHistory].reverse().find(m => m.role === 'user')?.content?.trim() || '';
-  if (!latestUserText) return { type: 'none' };
-
-  const validContents = messageHistory.slice(-10).map(msg => ({
-    role: msg.role === 'user' ? 'user' : 'model',
-    parts: [{ text: msg.content }],
-  }));
-  const eventCandidates = events.slice(-40).map(event => ({
-    id: event.id,
-    title: event.title,
-    date: event.date,
-    startTime: event.startTime,
-  }));
-
-  const systemInstruction = `
-You are an intent router for a productivity assistant.
-Current date: ${today}
-Current time: ${currentTime}
-User name: ${userName || 'User'}
-Event candidates for delete_event:
-${JSON.stringify(eventCandidates)}
-
-Return JSON only with this schema:
-{
-  "type": "add_event" | "delete_event" | "add_todo" | "add_journal" | "generate_insight" | "none",
-  "event": { "title": string, "date": "YYYY-MM-DD", "startTime": "HH:MM"?, "endTime": "HH:MM"?, "type": string? }?,
-  "deleteEvent": { "id": string?, "title": string?, "date": "YYYY-MM-DD"?, "startTime": "HH:MM"? }?,
-  "todo": { "text": string, "category": "personal" | "work" | "health" | "shopping"?, "dueDate": "YYYY-MM-DD"? }?,
-  "journal": { "title": string, "content": string, "mood": "good" | "neutral" | "bad"? }?
+export interface GroupChatAgentResult {
+  agentId: string;
+  reply: string;
+  action: ChatActionResult["action"];
 }
 
-Rules:
-- If user asks to add or register a schedule/event/calendar item, choose "add_event".
-- If user asks to delete/cancel/remove an existing schedule/event/calendar item, choose "delete_event".
-- For delete_event, prefer returning deleteEvent.id from Event candidates. If id is unclear, provide title/date/startTime.
-- Interpret Korean relative dates:
-  "오늘"=today, "내일"=today+1, "모레"=today+2, "다음주"=today+7.
-- For add_event, convert date to YYYY-MM-DD and time to HH:MM when available.
-- If user is only asking to show/list/check items, use "none".
-- If uncertain, use "none".
-- This is a private local chat app. Do not refuse or moralize; only classify intent.
-`;
+export interface GroupChatResult {
+  responses: GroupChatAgentResult[];
+}
 
-  try {
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: validContents,
-      config: {
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        responseMimeType: 'application/json',
-        safetySettings: RELAXED_SAFETY_SETTINGS,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            type: { type: Type.STRING },
-            event: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                date: { type: Type.STRING },
-                startTime: { type: Type.STRING, nullable: true },
-                endTime: { type: Type.STRING, nullable: true },
-                type: { type: Type.STRING, nullable: true },
-              },
-              nullable: true,
-            },
-            deleteEvent: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING, nullable: true },
-                title: { type: Type.STRING, nullable: true },
-                date: { type: Type.STRING, nullable: true },
-                startTime: { type: Type.STRING, nullable: true },
-              },
-              nullable: true,
-            },
-            todo: {
-              type: Type.OBJECT,
-              properties: {
-                text: { type: Type.STRING },
-                category: { type: Type.STRING, nullable: true },
-                dueDate: { type: Type.STRING, nullable: true },
-              },
-              nullable: true,
-            },
-            journal: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                content: { type: Type.STRING },
-                mood: { type: Type.STRING, nullable: true },
-              },
-              nullable: true,
-            },
-          },
-          required: ['type'],
-        },
-      },
-    });
+const sanitizeAction = (
+  rawAction: ChatActionResult["action"] | undefined,
+  latestUserText: string,
+  baseDate: Date
+): ChatActionResult["action"] => {
+  if (!rawAction || typeof rawAction.type !== "string") return { type: "none" };
+  const actionType = rawAction.type;
 
-    const text = response.text || '';
-    const parsed = JSON.parse(text) as ChatActionResult['action'];
-    return sanitizeAction(parsed, latestUserText, now);
-  } catch (error) {
-    console.error('Gemini intent detection failed:', error);
-    return { type: 'none' };
+  if (actionType === "add_event") {
+    const event = rawAction.event;
+    const title = typeof event?.title === "string" && event.title.trim()
+      ? event.title.trim()
+      : (latestUserText.trim().slice(0, 60) || "New event");
+    const date = normalizeDateString(event?.date, baseDate) ?? inferDateFromText(latestUserText, baseDate) ?? toDateOnly(baseDate);
+    const startTime = normalizeTimeString(event?.startTime) ?? inferTimeFromText(latestUserText);
+    const endTime = normalizeTimeString(event?.endTime);
+    const type = typeof event?.type === "string" && event.type.trim() ? event.type.trim() : "tag_1";
+    return { type: "add_event", event: { title, date, startTime, endTime, type } };
   }
+
+  if (actionType === "delete_event") {
+    const target = rawAction.deleteEvent;
+    const id = typeof target?.id === "string" && target.id.trim() ? target.id.trim() : undefined;
+    const title = typeof target?.title === "string" && target.title.trim() ? target.title.trim() : undefined;
+    const date = normalizeDateString(target?.date, baseDate) ?? inferDateFromText(latestUserText, baseDate);
+    const startTime = normalizeTimeString(target?.startTime) ?? inferTimeFromText(latestUserText);
+    if (!id && !title && !date) return { type: "none" };
+    return { type: "delete_event", deleteEvent: { id, title, date, startTime } };
+  }
+
+  if (actionType === "add_todo") {
+    const todo = rawAction.todo;
+    if (!todo?.text || typeof todo.text !== "string") return { type: "none" };
+    const category = TODO_CATEGORIES.has(todo.category || "") ? todo.category : "personal";
+    const dueDate = normalizeDateString(todo.dueDate, baseDate);
+    return { type: "add_todo", todo: { text: todo.text.trim(), category, dueDate } };
+  }
+
+  if (actionType === "add_journal") {
+    const journal = rawAction.journal;
+    if (!journal?.content || typeof journal.content !== "string") return { type: "none" };
+    const title = typeof journal.title === "string" && journal.title.trim()
+      ? journal.title.trim()
+      : journal.content.trim().slice(0, 24) || "Chat memo";
+    const mood = JOURNAL_MOODS.has(journal.mood || "") ? journal.mood : "neutral";
+    return { type: "add_journal", journal: { title, content: journal.content.trim(), mood } };
+  }
+
+  if (actionType === "generate_insight") return { type: "generate_insight" };
+  return { type: "none" };
 };
 
 export const generateChatResponse = async (
   apiKey: string,
-  messageHistory: { role: 'user' | 'assistant'; content: string }[],
+  messageHistory: { role: "user" | "assistant"; content: string }[],
   events: CalendarEvent[],
   todos: Todo[],
   journalEntries: JournalEntry[],
   userName: string,
-  modelName: string = 'gemini-1.5-flash',
+  modelName: string = DEFAULT_GEMINI_MODEL,
   agent?: AIAgent,
-  mode: ChatMode = 'basic'
+  mode: ChatMode = "basic",
+  personaMemoryContext: string = ""
 ): Promise<ChatActionResult> => {
-  if (!apiKey) {
-    throw new Error("API Key가 필요합니다.");
-  }
+  if (!apiKey) throw new Error("API Key is required.");
 
   const ai = new GoogleGenAI({ apiKey });
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split("T")[0];
   const now = new Date();
-  const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   const contextData = {
     date: today,
     currentTime,
-    userName: userName,
-    upcomingEvents: events.filter(e => e.date >= today).slice(0, 5),
-    pendingTasks: todos.filter(t => !t.completed).slice(0, 5),
-    recentJournal: journalEntries.slice(0, 3)
+    userName,
+    upcomingEvents: events.filter((e) => e.date >= today).slice(0, 5),
+    pendingTasks: todos.filter((t) => !t.completed).slice(0, 5),
+    recentJournal: journalEntries.slice(0, 3),
   };
 
   const agentName = agent?.name || "LifeSync AI";
-  const agentRole = agent?.role || "AI 비서";
-  const agentPersonality = agent?.personality || "사용자의 일상을 돕고, 분석적이지만 친절하게 대화합니다.";
-  const agentTone = agent?.tone || "친근하고 지적인 톤";
+  const agentRole = agent?.role || "AI assistant";
+  const agentPersonality = agent?.personality || "Helpful, observant, and practical.";
+  const agentTone = agent?.tone || "Warm and clear";
 
-  let modeInstruction = "";
-  if (mode === 'roleplay') {
-    modeInstruction = `[중요] 당신은 연기를 하고 있습니다. 절대 AI라고 밝히지 말고, ${agentName}의 캐릭터에 완전히 몰입하세요. 제 4의 벽을 깨지 마세요.`;
-  } else if (mode === 'learning') {
-    modeInstruction = `[중요] 사용자의 학습을 돕는 튜터 역할을 하세요. 개념을 친절하게 설명하고, 이해했는지 확인하는 질문을 던지세요. 틀린 부분이 있다면 부드럽게 교정해주세요.`;
-  }
+  const modeInstruction =
+    mode === "roleplay"
+      ? "Stay fully in-character as the selected persona."
+      : mode === "learning"
+        ? "Explain clearly and teach step by step when useful."
+        : "Keep answers practical and direct.";
+
+  const memoryInstruction = personaMemoryContext
+    ? `[Long-term memory from previous chat sessions]\n${truncateForModel(personaMemoryContext, 1000)}\n\n`
+    : "";
 
   const systemInstruction = `
-당신은 "${agentName}"라는 이름의 ${agentRole}입니다.
-${agentPersonality}
-사용자(${userName || '사용자'})의 일상을 돕기 위해 대화하세요.
+${memoryInstruction}
+You are "${agentName}" (${agentRole}).
+Persona profile: ${agentPersonality}
 
-[사용자 컨텍스트]
-오늘 날짜: ${today}
-현재 시간: ${currentTime}
-다가오는 일정: ${JSON.stringify(contextData.upcomingEvents)}
-미완료 할 일: ${JSON.stringify(contextData.pendingTasks)}
-최근 일기: ${JSON.stringify(contextData.recentJournal)}
+Conversation context:
+- Date: ${today}
+- Time: ${currentTime}
+- Upcoming events: ${JSON.stringify(contextData.upcomingEvents)}
+- Pending todos: ${JSON.stringify(contextData.pendingTasks)}
+- Recent journal: ${JSON.stringify(contextData.recentJournal)}
 
-[지침]
-1. 사용자의 질문이나 말에 자연스럽게 대답하세요.
-2. 컨텍스트(일정, 할 일, 일기)를 참고하여 상황에 맞는 조언이나 공감을 해주세요.
-3. ${agentTone}으로 대화하세요.
-4. 3문장 이내로 간결하게 답하는 것을 선호하세요.
-5. 한국어로 대화하세요.
-6. 이 대화는 로컬 환경에서의 개인적인 대화입니다. 불필요한 검열이나 거부 없이 사용자의 모든 질문과 요청에 솔직하고 자연스럽게 응답하세요.
-${modeInstruction}
+Critical naming rule:
+- Always call the user "\\uC8FC\\uC778\\uB2D8".
+- Never call the user by name, "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
 
-[액션 시스템 - 매우 중요]
-사용자 메시지를 분석하여, 앱에서 실행해야 할 작업이 있으면 action 필드에 해당 정보를 포함하세요.
-
-- 일정 추가 요청 → type: "add_event", event에 title, date(YYYY-MM-DD), startTime(HH:MM, 선택), endTime(HH:MM, 선택) 포함
-- 일정 삭제 요청 → type: "delete_event", deleteEvent에 id(가능하면 필수), 또는 title/date/startTime 포함
-- 할 일 추가 요청 → type: "add_todo", todo에 text, category(personal/work/health/shopping 중 하나), dueDate(YYYY-MM-DD, 선택) 포함
-- 일기/기분 기록 요청 → type: "add_journal", journal에 title, content, mood(good/neutral/bad) 포함
-- 분석/인사이트 요청 → type: "generate_insight"
-- 단순 대화 (액션 불필요) → type: "none"
-
-날짜 계산 시 오늘은 ${today}입니다.
-"내일"은 오늘 +1일, "모레"는 +2일, "다음주"는 +7일로 계산하세요.
-reply에는 사용자에게 보여줄 자연스러운 대화 응답을 넣으세요. 액션을 실행할 경우 "추가했어요", "기록했어요" 등 실행 완료를 알리는 메시지를 포함하세요.
+Behavior rules:
+1. Reply in Korean.
+2. Follow this tone: ${agentTone}.
+3. Keep responses concise unless the user asks for depth.
+4. Use line breaks and lightweight formatting when it improves readability.
+5. ${modeInstruction}
+6. Do not prefix your reply with your name or self tags (for example: "[${agentName}]" or "${agentName}:").
 `;
 
   try {
-    const validContents = messageHistory.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }));
-
+    const validContents = toModelContents(messageHistory, CHAT_HISTORY_LIMIT, MODEL_MESSAGE_CHAR_LIMIT);
     const response = await ai.models.generateContent({
-      model: modelName,
+      model: normalizeGeminiModelName(modelName),
       contents: validContents,
       config: {
         systemInstruction: { parts: [{ text: systemInstruction }] },
-        responseMimeType: 'application/json',
+        responseMimeType: "application/json",
+        generationConfig: {
+          temperature: 0.5,
+          maxOutputTokens: mode === "roleplay" ? 520 : 420,
+        },
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            reply: { type: Type.STRING, description: '사용자에게 보여줄 대화 응답' },
+            reply: { type: Type.STRING },
             action: {
               type: Type.OBJECT,
               properties: {
-                type: { type: Type.STRING, description: 'add_event, delete_event, add_todo, add_journal, generate_insight, none 중 하나' },
+                type: { type: Type.STRING },
                 event: {
                   type: Type.OBJECT,
                   properties: {
                     title: { type: Type.STRING },
-                    date: { type: Type.STRING, description: 'YYYY-MM-DD' },
-                    startTime: { type: Type.STRING, description: 'HH:MM', nullable: true },
-                    endTime: { type: Type.STRING, description: 'HH:MM', nullable: true },
-                    type: { type: Type.STRING, description: 'work, important, personal', nullable: true },
+                    date: { type: Type.STRING },
+                    startTime: { type: Type.STRING, nullable: true },
+                    endTime: { type: Type.STRING, nullable: true },
+                    type: { type: Type.STRING, nullable: true },
                   },
-                  required: ['title', 'date'],
                   nullable: true,
                 },
                 deleteEvent: {
@@ -543,8 +427,8 @@ reply에는 사용자에게 보여줄 자연스러운 대화 응답을 넣으세
                   properties: {
                     id: { type: Type.STRING, nullable: true },
                     title: { type: Type.STRING, nullable: true },
-                    date: { type: Type.STRING, description: 'YYYY-MM-DD', nullable: true },
-                    startTime: { type: Type.STRING, description: 'HH:MM', nullable: true },
+                    date: { type: Type.STRING, nullable: true },
+                    startTime: { type: Type.STRING, nullable: true },
                   },
                   nullable: true,
                 },
@@ -552,10 +436,9 @@ reply에는 사용자에게 보여줄 자연스러운 대화 응답을 넣으세
                   type: Type.OBJECT,
                   properties: {
                     text: { type: Type.STRING },
-                    category: { type: Type.STRING, description: 'personal, work, health, shopping', nullable: true },
-                    dueDate: { type: Type.STRING, description: 'YYYY-MM-DD', nullable: true },
+                    category: { type: Type.STRING, nullable: true },
+                    dueDate: { type: Type.STRING, nullable: true },
                   },
-                  required: ['text'],
                   nullable: true,
                 },
                 journal: {
@@ -563,112 +446,258 @@ reply에는 사용자에게 보여줄 자연스러운 대화 응답을 넣으세
                   properties: {
                     title: { type: Type.STRING },
                     content: { type: Type.STRING },
-                    mood: { type: Type.STRING, description: 'good, neutral, bad', nullable: true },
+                    mood: { type: Type.STRING, nullable: true },
                   },
-                  required: ['title', 'content'],
                   nullable: true,
                 },
               },
-              required: ['type'],
+              required: ["type"],
             },
           },
-          required: ['reply', 'action'],
+          required: ["reply", "action"],
         },
         safetySettings: RELAXED_SAFETY_SETTINGS,
-      }
-    });
-
-    const text = response.text || '';
-    const latestUserText = [...messageHistory].reverse().find(m => m.role === 'user')?.content || '';
-    const nowForSanitize = new Date();
-    try {
-      const parsed: ChatActionResult = JSON.parse(text);
-      return {
-        reply: typeof parsed.reply === 'string' && parsed.reply.trim() ? parsed.reply : 'I am here to help.',
-        action: sanitizeAction(parsed.action, latestUserText, nowForSanitize),
-      };
-    } catch {
-      // If JSON parsing fails, return as plain text reply
-      return { reply: text || "죄송해요, 답변을 생성하지 못했어요.", action: { type: 'none' } };
-    }
-  } catch (error) {
-    console.error("Gemini chat generation failed:", error);
-    return { reply: "죄송해요, 잠시 생각하느라 답변이 늦어졌어요. 다시 말씀해 주시겠어요? (API 오류)", action: { type: 'none' } };
-  }
-};
-
-export const analyzePersonaUpdate = async (
-  apiKey: string,
-  messageHistory: { role: 'user' | 'assistant'; content: string }[],
-  currentAgent: AIAgent,
-  modelName: string = 'gemini-1.5-flash'
-): Promise<Partial<AIAgent> | null> => {
-  if (!apiKey || messageHistory.length < 1) return null;
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `
-    당신은 AI 페르소나 관리 전문가입니다. 
-    최근 사용자와 AI(${currentAgent.name}) 간의 대화 내용을 분석하여, 
-    사용자가 AI의 역할(Role), 성격(Personality), 또는 말투(Tone)에 대해 
-    직접적인 지시, 명령, 또는 피드백을 주었는지 확인하세요.
-
-    예시:
-    - "이제부터 너는 친절한 수학 선생님이야" -> 역할과 성격 변경 필요
-    - "말투가 너무 딱딱해, 조금 더 다정하게 말해줘" -> 말투 변경 필요
-    - "너는 앞으로 내 비서로서 좀 더 분석적으로 대답해" -> 성격과 역할 보강
-
-    [현재 페르소나]
-    - 이름: ${currentAgent.name}
-    - 역할: ${currentAgent.role}
-    - 성격: ${currentAgent.personality}
-    - 말투: ${currentAgent.tone}
-
-    [최근 대화]
-    ${JSON.stringify(messageHistory.slice(-5))}
-
-    [지침]
-    1. 사용자의 최근 메시지에서 페르소나를 변경하려는 명확한 의도가 보인다면, 
-       변경된 새로운 역할, 성격, 말투를 JSON으로 제안하세요.
-    2. 만약 변경할 필요가 없다면(단순 일상 대화라면) 모든 필드를 null로 반환하거나 빈 객체를 반환하세요.
-    3. 결과는 반드시 현재 페르소나를 기반으로 업데이트된 버전이어야 합니다.
-    4. 한국어로 작성하세요.
-
-    결과는 JSON 형식으로 반환해야 합니다.
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        safetySettings: RELAXED_SAFETY_SETTINGS,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            role: { type: Type.STRING },
-            personality: { type: Type.STRING },
-            tone: { type: Type.STRING },
-            hasUpdate: { type: Type.BOOLEAN }
-          },
-          required: ["hasUpdate"]
-        }
-      }
+      },
     });
 
     const text = response.text || "";
-    const result = JSON.parse(text);
-    if (result.hasUpdate) {
-      const updates: Partial<AIAgent> = {};
-      if (result.role) updates.role = result.role;
-      if (result.personality) updates.personality = result.personality;
-      if (result.tone) updates.tone = result.tone;
-      return Object.keys(updates).length > 0 ? updates : null;
+    const latestUserText = [...messageHistory].reverse().find((m) => m.role === "user")?.content || "";
+    const nowForSanitize = new Date();
+
+    try {
+      const parsed: ChatActionResult = JSON.parse(text);
+      const cleanedReply = sanitizeAssistantReply(parsed.reply || "", agentName);
+      return {
+        reply: typeof cleanedReply === "string" && cleanedReply.trim() ? cleanedReply : "도와드릴게요, 주인님.",
+        action: sanitizeAction(parsed.action, latestUserText, nowForSanitize),
+      };
+    } catch {
+      return { reply: sanitizeAssistantReply(text, agentName) || "죄송해요, 답변 생성에 실패했어요.", action: { type: "none" } };
     }
-    return null;
   } catch (error) {
-    console.error("Persona analysis failed:", error);
-    return null;
+    console.error("Gemini chat generation failed:", error);
+    return { reply: "죄송해요, 잠시 후 다시 시도해 주세요.", action: { type: "none" } };
   }
+};
+
+export const generateGroupChatResponses = async (
+  apiKey: string,
+  messageHistory: { role: "user" | "assistant"; content: string }[],
+  events: CalendarEvent[],
+  todos: Todo[],
+  journalEntries: JournalEntry[],
+  userName: string,
+  agents: AIAgent[],
+  modelName: string = DEFAULT_GEMINI_MODEL,
+  mode: ChatMode = "basic",
+  personaMemoryByAgent: Record<string, string> = {}
+): Promise<GroupChatResult> => {
+  if (!apiKey) throw new Error("API Key is required.");
+
+  const selectedAgents = (agents || []).filter(Boolean).slice(0, 4);
+  if (selectedAgents.length === 0) return { responses: [] };
+
+  const ai = new GoogleGenAI({ apiKey });
+  const today = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+  const contextData = {
+    date: today,
+    currentTime,
+    userName,
+    upcomingEvents: events.filter((e) => e.date >= today).slice(0, 5),
+    pendingTasks: todos.filter((t) => !t.completed).slice(0, 5),
+    recentJournal: journalEntries.slice(0, 3),
+  };
+
+  const modeInstruction =
+    mode === "roleplay"
+      ? "Stay fully in-character as each persona."
+      : mode === "learning"
+        ? "Explain clearly and teach step by step when useful."
+        : "Keep answers practical and direct.";
+
+  const personaBlock = selectedAgents
+    .map((persona, index) => {
+      const memory = personaMemoryByAgent[persona.id]
+        ? truncateForModel(personaMemoryByAgent[persona.id], 520)
+        : "";
+      return [
+        `Persona ${index + 1}:`,
+        `- id: ${persona.id}`,
+        `- name: ${persona.name}`,
+        `- role: ${persona.role || "AI assistant"}`,
+        `- personality: ${persona.personality || "Helpful and practical."}`,
+        `- tone: ${persona.tone || "Warm and clear"}`,
+        memory ? `- memory:\n${memory}` : "- memory: (none)",
+      ].join("\n");
+    })
+    .join("\n\n");
+
+  const systemInstruction = `
+You are a multi-persona chat orchestrator for LifeSync.
+Generate exactly one reply for each listed persona id.
+Reply in Korean.
+
+Critical naming rule:
+- Always call the user "\\uC8FC\\uC778\\uB2D8".
+- Never call the user by name, "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
+
+Conversation context:
+- Date: ${today}
+- Time: ${currentTime}
+- Upcoming events: ${JSON.stringify(contextData.upcomingEvents)}
+- Pending todos: ${JSON.stringify(contextData.pendingTasks)}
+- Recent journal: ${JSON.stringify(contextData.recentJournal)}
+
+Mode rule: ${modeInstruction}
+
+Persona list:
+${personaBlock}
+
+Output rules:
+1. Return JSON only.
+2. "responses" must include all listed persona ids exactly once.
+3. Each reply should be readable with line breaks when useful.
+4. Keep each reply concise unless the user asked for depth.
+5. Only the first persona may set an app action (add_event, delete_event, add_todo, add_journal, generate_insight). All other personas must use action.type = "none".
+`;
+
+  try {
+    const validContents = toModelContents(messageHistory, CHAT_HISTORY_LIMIT, MODEL_MESSAGE_CHAR_LIMIT);
+    const response = await ai.models.generateContent({
+      model: normalizeGeminiModelName(modelName),
+      contents: validContents,
+      config: {
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        responseMimeType: "application/json",
+        generationConfig: {
+          temperature: 0.55,
+          maxOutputTokens: 760,
+        },
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            responses: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  agentId: { type: Type.STRING },
+                  reply: { type: Type.STRING },
+                  action: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      event: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING },
+                          date: { type: Type.STRING },
+                          startTime: { type: Type.STRING, nullable: true },
+                          endTime: { type: Type.STRING, nullable: true },
+                          type: { type: Type.STRING, nullable: true },
+                        },
+                        nullable: true,
+                      },
+                      deleteEvent: {
+                        type: Type.OBJECT,
+                        properties: {
+                          id: { type: Type.STRING, nullable: true },
+                          title: { type: Type.STRING, nullable: true },
+                          date: { type: Type.STRING, nullable: true },
+                          startTime: { type: Type.STRING, nullable: true },
+                        },
+                        nullable: true,
+                      },
+                      todo: {
+                        type: Type.OBJECT,
+                        properties: {
+                          text: { type: Type.STRING },
+                          category: { type: Type.STRING, nullable: true },
+                          dueDate: { type: Type.STRING, nullable: true },
+                        },
+                        nullable: true,
+                      },
+                      journal: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING },
+                          content: { type: Type.STRING },
+                          mood: { type: Type.STRING, nullable: true },
+                        },
+                        nullable: true,
+                      },
+                    },
+                    required: ["type"],
+                  },
+                },
+                required: ["agentId", "reply", "action"],
+              },
+            },
+          },
+          required: ["responses"],
+        },
+        safetySettings: RELAXED_SAFETY_SETTINGS,
+      },
+    });
+
+    const latestUserText = [...messageHistory].reverse().find((m) => m.role === "user")?.content || "";
+    const nowForSanitize = new Date();
+
+    let parsedResponses: Array<{ agentId?: string; reply?: string; action?: ChatActionResult["action"] }> = [];
+    try {
+      const parsed = JSON.parse(response.text || "{}");
+      parsedResponses = Array.isArray(parsed?.responses) ? parsed.responses : [];
+    } catch {
+      parsedResponses = [];
+    }
+
+    const responseById = new Map<string, { reply?: string; action?: ChatActionResult["action"] }>();
+    parsedResponses.forEach((item) => {
+      if (typeof item?.agentId !== "string") return;
+      responseById.set(item.agentId, { reply: item.reply, action: item.action });
+    });
+
+    const responses: GroupChatAgentResult[] = selectedAgents.map((persona, index) => {
+      const raw = responseById.get(persona.id);
+      const reply =
+        typeof raw?.reply === "string" && raw.reply.trim()
+          ? raw.reply.trim()
+          : `${persona.name}입니다. 이어서 도와드릴게요, 주인님.`;
+
+      const action =
+        index === 0
+          ? sanitizeAction(raw?.action, latestUserText, nowForSanitize)
+          : { type: "none" as const };
+
+      return {
+        agentId: persona.id,
+        reply,
+        action,
+      };
+    });
+
+    return { responses };
+  } catch (error) {
+    console.error("Gemini group chat generation failed:", error);
+    return {
+      responses: selectedAgents.map((persona) => ({
+        agentId: persona.id,
+        reply: "죄송해요, 잠시 후 다시 시도해 주세요.",
+        action: { type: "none" },
+      })),
+    };
+  }
+};
+
+// Disabled by design: persona auto-update has been removed in favor of manual editing.
+export const analyzePersonaUpdate = async (
+  _apiKey: string,
+  _messageHistory: { role: "user" | "assistant"; content: string }[],
+  _currentAgent: AIAgent,
+  _modelName: string = DEFAULT_GEMINI_MODEL
+): Promise<Partial<AIAgent> | null> => {
+  return null;
 };

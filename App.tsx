@@ -8,11 +8,11 @@ import CalendarView from './views/CalendarView';
 import TodoView from './views/TodoView';
 import JournalView from './views/JournalView';
 import CommunityBoardView from './views/CommunityBoardView';
-import { DEFAULT_AGENTS } from './views/PersonaSettingsView';
+import { DEFAULT_AGENTS } from './data/defaultAgents';
 import SettingsView from './views/SettingsView';
 import ChatView from './views/ChatView';
 import AuthView from './views/AuthView';
-import { getActiveGeminiConfig } from './utils/aiConfig';
+import { DEFAULT_GEMINI_MODEL, getActiveGeminiConfig } from './utils/aiConfig';
 import { normalizeKoreanText } from './utils/encodingFix';
 
 // Mock Data Loaders (In a real app, this would be an API or more robust local storage)
@@ -36,6 +36,10 @@ type ChatObservation = {
 };
 
 const CHAT_OBSERVATIONS_KEY = 'ls_recent_chat_observations';
+const PERSONA_MEMORY_SESSION_LIMIT = 4;
+const PERSONA_MEMORY_LINE_LIMIT = 12;
+const PERSONA_MEMORY_ITEM_CHAR_LIMIT = 120;
+const PERSONA_MEMORY_TOTAL_CHAR_LIMIT = 1400;
 
 const appendChatObservation = (text: string) => {
   const trimmed = text.trim();
@@ -53,8 +57,28 @@ const appendChatObservation = (text: string) => {
   saveToStorage(CHAT_OBSERVATIONS_KEY, next);
 };
 
+const dedupeAgentIds = (ids: Array<string | undefined | null>): string[] =>
+  Array.from(
+    new Set(
+      ids
+        .map(id => (typeof id === 'string' ? id.trim() : ''))
+        .filter(Boolean)
+    )
+  );
+
+const extractAssistantAgentIds = (messages: ChatMessage[]): string[] =>
+  dedupeAgentIds(
+    (messages || [])
+      .filter(message => message.role === 'assistant')
+      .map(message => message.agentId)
+  );
+
 const inferAgentIdFromMessages = (messages: ChatMessage[], agents: AIAgent[]): string | undefined => {
   if (!messages?.length || !agents?.length) return undefined;
+
+  const taggedAgentId = extractAssistantAgentIds(messages)[0];
+  if (taggedAgentId) return taggedAgentId;
+
   const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, '').trim();
   const assistantMessages = messages.filter(m => m.role === 'assistant');
 
@@ -67,6 +91,129 @@ const inferAgentIdFromMessages = (messages: ChatMessage[], agents: AIAgent[]): s
   return undefined;
 };
 
+const resolveSessionAgentIds = (
+  session: ChatSession,
+  agents: AIAgent[],
+  fallbackIds: string[] = []
+): string[] => {
+  const fromSession = dedupeAgentIds([
+    ...(Array.isArray(session.agentIds) ? session.agentIds : []),
+    session.agentId,
+  ]);
+  if (fromSession.length > 0) return fromSession;
+
+  const fromMessages = extractAssistantAgentIds(session.messages || []);
+  if (fromMessages.length > 0) return fromMessages;
+
+  const inferred = inferAgentIdFromMessages(session.messages || [], agents);
+  if (inferred) return [inferred];
+
+  const fallback = dedupeAgentIds(fallbackIds);
+  if (fallback.length > 0) return fallback;
+
+  return agents[0]?.id ? [agents[0].id] : [];
+};
+
+const isSameAgentIdList = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  return a.every((id, index) => id === b[index]);
+};
+
+const hasUserChatMessage = (session: ChatSession): boolean =>
+  Array.isArray(session.messages) && session.messages.some((m: ChatMessage) => m.role === 'user');
+
+const isSameChatMessageList = (a: ChatMessage[], b: ChatMessage[]): boolean => {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.id !== right.id ||
+      left.role !== right.role ||
+      left.content !== right.content ||
+      left.timestamp !== right.timestamp ||
+      left.agentId !== right.agentId
+    ) {
+      return false;
+    }
+
+    const leftAction = left.action;
+    const rightAction = right.action;
+    if (Boolean(leftAction) !== Boolean(rightAction)) return false;
+    if (leftAction && rightAction) {
+      if (
+        leftAction.type !== rightAction.type ||
+        leftAction.executed !== rightAction.executed ||
+        JSON.stringify(leftAction.data ?? null) !== JSON.stringify(rightAction.data ?? null)
+      ) {
+        return false;
+      }
+    }
+
+    const leftQuickReplies = left.quickReplies || [];
+    const rightQuickReplies = right.quickReplies || [];
+    if (leftQuickReplies.length !== rightQuickReplies.length) return false;
+    for (let j = 0; j < leftQuickReplies.length; j += 1) {
+      if (leftQuickReplies[j] !== rightQuickReplies[j]) return false;
+    }
+  }
+
+  return true;
+};
+
+const truncateMemoryText = (value: string, maxChars: number): string => {
+  const text = (value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...`;
+};
+
+const buildPersonaMemoryContext = (
+  sessions: ChatSession[],
+  agentId: string,
+  activeSessionId: string | null
+): string => {
+  if (!agentId) return '';
+
+  const related = sessions
+    .filter(session => {
+      if (session.id === activeSessionId) return false;
+      if (!Array.isArray(session.messages) || session.messages.length === 0) return false;
+      const sessionAgentIds = dedupeAgentIds([
+        ...(Array.isArray(session.agentIds) ? session.agentIds : []),
+        session.agentId,
+        ...extractAssistantAgentIds(session.messages),
+      ]);
+      return sessionAgentIds.includes(agentId);
+    })
+    .sort((a, b) => {
+      const aTs = new Date(a.lastMessageAt || a.createdAt).getTime();
+      const bTs = new Date(b.lastMessageAt || b.createdAt).getTime();
+      return bTs - aTs;
+    })
+    .slice(0, PERSONA_MEMORY_SESSION_LIMIT);
+
+  if (related.length === 0) return '';
+
+  const lines: string[] = [];
+  for (const session of related) {
+    const recentMessages = session.messages.slice(-8);
+    for (const msg of recentMessages) {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      const content = truncateMemoryText(msg.content || '', PERSONA_MEMORY_ITEM_CHAR_LIMIT);
+      if (!content) continue;
+      lines.push(`[${truncateMemoryText(session.title || 'Chat', 24)}] ${role}: ${content}`);
+      if (lines.length >= PERSONA_MEMORY_LINE_LIMIT) break;
+    }
+    if (lines.length >= PERSONA_MEMORY_LINE_LIMIT) break;
+  }
+
+  if (lines.length === 0) return '';
+  return truncateMemoryText(lines.join('\n'), PERSONA_MEMORY_TOTAL_CHAR_LIMIT);
+};
+
 const normalizeCommunityPost = (post: any): CommunityPost => ({
   id: post.id,
   author: post.author,
@@ -76,6 +223,17 @@ const normalizeCommunityPost = (post: any): CommunityPost => ({
   trigger: post.trigger,
   order: typeof post.order === 'number' ? post.order : 0,
   comments: Array.isArray(post.comments) ? post.comments : undefined,
+});
+
+const normalizeAIAgent = (agent: any, fallbackOrder: number = 0): AIAgent => ({
+  id: String(agent?.id || crypto.randomUUID()),
+  name: normalizeKoreanText(String(agent?.name || `Persona ${fallbackOrder + 1}`)),
+  emoji: String(agent?.emoji || ':)'),
+  role: normalizeKoreanText(String(agent?.role || 'AI Assistant')),
+  personality: normalizeKoreanText(String(agent?.personality || 'Helpful and practical assistant persona.')),
+  tone: normalizeKoreanText(String(agent?.tone || 'Warm and clear.')),
+  color: String(agent?.color || '#37352f'),
+  avatar: typeof agent?.avatar === 'string' ? agent.avatar : undefined,
 });
 
 const DEFAULT_TAGS: CalendarTag[] = [
@@ -153,14 +311,19 @@ const App: React.FC = () => {
   // Activity Log & Settings
   const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => {
     const stored = loadFromStorage('ls_chat_sessions', []);
-    return Array.isArray(stored) ? stored : [];
+    return Array.isArray(stored) ? stored.filter((s: ChatSession) => hasUserChatMessage(s)) : [];
   });
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => loadFromStorage('ls_active_chat_id', null));
-  const [activeChatAgentId, setActiveChatAgentId] = useState<string>(() => loadFromStorage('ls_active_chat_agent', 'ARIA'));
+  const [activeChatAgentIds, setActiveChatAgentIds] = useState<string[]>(() => {
+    const stored = loadFromStorage<string[]>('ls_active_chat_agents', []);
+    if (Array.isArray(stored) && stored.length > 0) return dedupeAgentIds(stored);
+    const legacy = loadFromStorage<string>('ls_active_chat_agent', 'ARIA');
+    return dedupeAgentIds([legacy || 'ARIA']);
+  });
   const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => loadFromStorage('ls_activity', []));
   const [settings, setSettings] = useState<AppSettings>(() => {
     const storedSettings = loadFromStorage<any>('ls_settings', {
-      autoAiReactions: true,
+      autoAiReactions: false,
       chatActionConfirm: true,
       apiConnections: [],
       activeConnectionId: undefined
@@ -175,7 +338,7 @@ const App: React.FC = () => {
       storedSettings.apiConnections = [{
         id: 'legacy_gemini',
         provider: 'gemini',
-        modelName: 'gemini-1.5-flash',
+        modelName: DEFAULT_GEMINI_MODEL,
         apiKey: storedSettings.geminiApiKey,
         isActive: true
       }];
@@ -237,12 +400,15 @@ const App: React.FC = () => {
   const [editingAiAgentName, setEditingAiAgentName] = useState('');
   const [activeAiAgentMenu, setActiveAiAgentMenu] = useState<string | null>(null);
   const activeGeminiConfig = getActiveGeminiConfig(settings);
+  const primaryActiveChatAgentId = activeChatAgentIds[0] || aiAgents[0]?.id || 'ARIA';
 
 
   // Undo Toast
   const undoRef = useRef<null | (() => void)>(null);
   const [undoToast, setUndoToast] = useState<{ id: string; label: string } | null>(null);
   const scheduledPostKeyRef = useRef<string | null>(null);
+  const pendingJournalAiCommentIdsRef = useRef<Set<string>>(new Set());
+  const lastSyncedProfileAIFingerprintRef = useRef<string | null>(null);
 
   // Persistence Effects
   useEffect(() => saveToStorage('ls_events', events), [events]);
@@ -253,12 +419,42 @@ const App: React.FC = () => {
   useEffect(() => saveToStorage('ls_agents', aiAgents), [aiAgents]);
   useEffect(() => saveToStorage('ls_todo_lists', todoLists), [todoLists]);
   useEffect(() => saveToStorage('ls_activity', activityLog), [activityLog]);
+  useEffect(() => saveToStorage('ls_settings', settings), [settings]);
   useEffect(() => {
-    saveToStorage('ls_settings', settings);
-    if (currentUser && settings.geminiApiKey) {
-      supabase.from('profiles').update({ gemini_api_key: settings.geminiApiKey }).eq('id', currentUser.id);
-    }
-  }, [settings, currentUser]);
+    if (!currentUser) return;
+
+    const payload = {
+      gemini_api_key: settings.geminiApiKey ?? '',
+      auto_ai_reactions: settings.autoAiReactions,
+      active_gemini_model: activeGeminiConfig?.modelName || DEFAULT_GEMINI_MODEL,
+    };
+
+    const fingerprint = JSON.stringify(payload);
+    if (lastSyncedProfileAIFingerprintRef.current === fingerprint) return;
+    lastSyncedProfileAIFingerprintRef.current = fingerprint;
+
+    supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', currentUser.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error('Failed to sync AI profile settings:', error);
+          // If DB migration is not applied yet, avoid retry loops.
+          if (error.code !== '42703' && error.code !== '42P01') {
+            lastSyncedProfileAIFingerprintRef.current = null;
+          }
+        }
+      });
+  }, [
+    currentUser?.id,
+    settings.geminiApiKey,
+    settings.autoAiReactions,
+    activeGeminiConfig?.modelName,
+  ]);
+  useEffect(() => {
+    lastSyncedProfileAIFingerprintRef.current = null;
+  }, [currentUser?.id]);
   useEffect(() => saveToStorage('ls_current_view', currentView), [currentView]);
   useEffect(() => {
     setIsMobileMenuOpen(false);
@@ -284,33 +480,44 @@ const App: React.FC = () => {
   useEffect(() => saveToStorage('ls_journal_categories', journalCategories), [journalCategories]);
   useEffect(() => {
     // Only save sessions that have at least one user message
-    const sessionsToSave = chatSessions.filter(s =>
-      s.messages.some((m: ChatMessage) => m.role === 'user')
-    );
+    const sessionsToSave = chatSessions.filter((s: ChatSession) => hasUserChatMessage(s));
     saveToStorage('ls_chat_sessions', sessionsToSave);
   }, [chatSessions]);
   useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
-  useEffect(() => saveToStorage('ls_active_chat_agent', activeChatAgentId), [activeChatAgentId]);
+  useEffect(() => saveToStorage('ls_active_chat_agents', activeChatAgentIds), [activeChatAgentIds]);
+  useEffect(() => saveToStorage('ls_active_chat_agent', primaryActiveChatAgentId), [primaryActiveChatAgentId]);
   useEffect(() => {
     setChatSessions(prev => {
       let changed = false;
+      const fallbackAgentIds = aiAgents[0]?.id ? [aiAgents[0].id] : [];
       const next = prev.map(session => {
-        if (session.agentId) return session;
-        const inferredAgentId = inferAgentIdFromMessages(session.messages, aiAgents);
-        if (!inferredAgentId) return session;
+        const resolvedAgentIds = resolveSessionAgentIds(session, aiAgents, fallbackAgentIds);
+        if (resolvedAgentIds.length === 0) return session;
+        const normalizedExisting = dedupeAgentIds(Array.isArray(session.agentIds) ? session.agentIds : []);
+        const nextPrimary = resolvedAgentIds[0];
+        if (session.agentId === nextPrimary && isSameAgentIdList(normalizedExisting, resolvedAgentIds)) return session;
         changed = true;
-        return { ...session, agentId: inferredAgentId };
+        return { ...session, agentId: nextPrimary, agentIds: resolvedAgentIds };
       });
       return changed ? next : prev;
     });
   }, [aiAgents]);
   useEffect(() => {
+    setActiveChatAgentIds(prev => {
+      const valid = dedupeAgentIds(prev).filter(id => aiAgents.some(agent => agent.id === id));
+      if (valid.length === 0 && aiAgents[0]?.id) return [aiAgents[0].id];
+      return isSameAgentIdList(prev, valid) ? prev : valid;
+    });
+  }, [aiAgents]);
+  useEffect(() => {
     if (!activeChatSessionId) return;
     const activeSession = chatSessions.find(session => session.id === activeChatSessionId);
-    if (activeSession?.agentId && activeSession.agentId !== activeChatAgentId) {
-      setActiveChatAgentId(activeSession.agentId);
-    }
-  }, [activeChatSessionId, chatSessions, activeChatAgentId]);
+    if (!activeSession) return;
+
+    const resolvedAgentIds = resolveSessionAgentIds(activeSession, aiAgents, activeChatAgentIds);
+    if (resolvedAgentIds.length === 0) return;
+    setActiveChatAgentIds(prev => (isSameAgentIdList(prev, resolvedAgentIds) ? prev : resolvedAgentIds));
+  }, [activeChatSessionId, chatSessions, aiAgents]);
   useEffect(() => {
     if (currentUser) {
       saveToStorage('lifesync_user', currentUser);
@@ -318,6 +525,41 @@ const App: React.FC = () => {
       localStorage.removeItem('lifesync_user');
     }
   }, [currentUser]);
+
+  const persistAiAgentsForUser = async (userId: string, sourceAgents: AIAgent[]) => {
+    const normalizedAgents = (sourceAgents.length > 0 ? sourceAgents : DEFAULT_AGENTS).map((agent, index) => {
+      const normalized = normalizeAIAgent(agent, index);
+      return {
+        id: normalized.id,
+        user_id: userId,
+        name: normalized.name,
+        emoji: normalized.emoji,
+        role: normalized.role,
+        personality: normalized.personality,
+        tone: normalized.tone,
+        color: normalized.color,
+        avatar: normalized.avatar ?? null,
+        order: index,
+      };
+    });
+
+    const { error: clearError } = await supabase
+      .from('ai_agents')
+      .delete()
+      .eq('user_id', userId);
+
+    if (clearError) {
+      throw clearError;
+    }
+
+    if (normalizedAgents.length === 0) return;
+
+    const { error: insertError } = await supabase.from('ai_agents').insert(normalizedAgents);
+    if (insertError) {
+      throw insertError;
+    }
+  };
+
   // Supabase Auth Listener & Initial Sync
   useEffect(() => {
     const resolveProfile = async (user: any) => {
@@ -359,6 +601,17 @@ const App: React.FC = () => {
         avatar: session.user.user_metadata?.avatar_url || '',
         geminiApiKey: profile?.gemini_api_key || ''
       });
+      setSettings(prev => ({
+        ...prev,
+        autoAiReactions:
+          typeof profile?.auto_ai_reactions === 'boolean'
+            ? profile.auto_ai_reactions
+            : prev.autoAiReactions,
+        geminiApiKey:
+          typeof profile?.gemini_api_key === 'string'
+            ? profile.gemini_api_key
+            : prev.geminiApiKey,
+      }));
 
       // Initial data fetch from Supabase
       fetchUserData(session.user.id);
@@ -376,6 +629,17 @@ const App: React.FC = () => {
           avatar: session.user.user_metadata?.avatar_url || '',
           geminiApiKey: profile?.gemini_api_key || ''
         });
+        setSettings(prev => ({
+          ...prev,
+          autoAiReactions:
+            typeof profile?.auto_ai_reactions === 'boolean'
+              ? profile.auto_ai_reactions
+              : prev.autoAiReactions,
+          geminiApiKey:
+            typeof profile?.gemini_api_key === 'string'
+              ? profile.gemini_api_key
+              : prev.geminiApiKey,
+        }));
 
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
           fetchUserData(session.user.id);
@@ -396,14 +660,16 @@ const App: React.FC = () => {
       { data: dbJournalCategories },
       { data: dbJournalEntries },
       { data: dbEvents },
-      { data: dbPosts }
+      { data: dbPosts },
+      { data: dbAiAgents }
     ] = await Promise.all([
       supabase.from('todo_lists').select('*').eq('user_id', userId).order('order'),
       supabase.from('todos').select('*').eq('user_id', userId).order('order'),
       supabase.from('journal_categories').select('*').eq('user_id', userId),
       supabase.from('journal_entries').select('*').eq('user_id', userId).order('date', { ascending: false }),
       supabase.from('calendar_events').select('*').eq('user_id', userId),
-      supabase.from('community_posts').select('*').eq('user_id', userId).order('timestamp', { ascending: false })
+      supabase.from('community_posts').select('*').eq('user_id', userId).order('timestamp', { ascending: false }),
+      supabase.from('ai_agents').select('*').eq('user_id', userId).order('order')
     ]);
 
     // Migration Logic: If Supabase is empty but local state has data, migrate local data to Supabase
@@ -456,6 +722,14 @@ const App: React.FC = () => {
         );
       }
 
+      if (aiAgents.length > 0) {
+        try {
+          await persistAiAgentsForUser(userId, aiAgents);
+        } catch (error) {
+          console.error('Failed to migrate local AI agents:', error);
+        }
+      }
+
       // No need to fetch again, just keep current local state
       return;
     }
@@ -496,6 +770,17 @@ const App: React.FC = () => {
       );
     }
     if (dbEvents) setEvents(dbEvents);
+    if (dbAiAgents && dbAiAgents.length > 0) {
+      setAiAgents(
+        dbAiAgents.map((agent: any, index: number) => normalizeAIAgent(agent, index))
+      );
+    } else if (aiAgents.length > 0) {
+      try {
+        await persistAiAgentsForUser(userId, aiAgents);
+      } catch (error) {
+        console.error('Failed to bootstrap AI agents into Supabase:', error);
+      }
+    }
 
     const localCommunityPosts = loadFromStorage<CommunityPost[]>('ls_community', [])
       .map(normalizeCommunityPost)
@@ -623,6 +908,8 @@ const App: React.FC = () => {
 
   // Trigger helper
   const triggerAI = (context: TriggerContext) => {
+    // Signed-in users use server-side queue processing to avoid duplicate calls.
+    if (currentUser) return;
     if (!settings.autoAiReactions) return;
     const recentChats = loadFromStorage<ChatObservation[]>(CHAT_OBSERVATIONS_KEY, []).slice(-8);
 
@@ -671,8 +958,12 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    // Signed-in users use server scheduler (Edge Function + queue).
+    if (currentUser) return;
+
     const FOUR_HOURS = 4;
     const storageKey = 'ls_last_scheduled_post_key';
+    const RECENT_ACTIVITY_WINDOW_MS = FOUR_HOURS * 60 * 60 * 1000;
 
     const getLocalBucketKey = (date: Date) => {
       const year = date.getFullYear();
@@ -683,8 +974,20 @@ const App: React.FC = () => {
       return `${year}-${month}-${day}T${hour}`;
     };
 
+    const hasRecentActivity = (now: Date): boolean => {
+      const nowMs = now.getTime();
+      return activityLog.slice(-50).some(item => {
+        const ts = new Date(item.timestamp).getTime();
+        return Number.isFinite(ts) && nowMs - ts <= RECENT_ACTIVITY_WINDOW_MS;
+      });
+    };
+
     const maybeTriggerScheduledDigest = () => {
+      if (!settings.autoAiReactions || !activeGeminiConfig?.apiKey) return;
+
       const now = new Date();
+      if (!hasRecentActivity(now)) return;
+
       const key = getLocalBucketKey(now);
       const saved = localStorage.getItem(storageKey);
 
@@ -709,7 +1012,7 @@ const App: React.FC = () => {
     tick();
     const intervalId = setInterval(tick, 60_000);
     return () => clearInterval(intervalId);
-  }, [settings.autoAiReactions, activeGeminiConfig?.apiKey, entries, events, todos, aiAgents]);
+  }, [currentUser, settings.autoAiReactions, activeGeminiConfig?.apiKey, entries, events, todos, aiAgents, activityLog]);
 
   const addTodoList = async (title: string) => {
     const trimmed = title.trim();
@@ -751,11 +1054,11 @@ const App: React.FC = () => {
     }
   };
 
-  const addAiAgent = (name: string) => {
+  const addAiAgent = async (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
     if (aiAgents.some(a => a.name === trimmed)) return;
-    const newAgent: AIAgent = {
+    const newAgent: AIAgent = normalizeAIAgent({
       id: crypto.randomUUID(),
       name: trimmed,
       emoji: '👤',
@@ -763,22 +1066,49 @@ const App: React.FC = () => {
       personality: '사용자가 직접 생성한 AI 페르소나입니다.',
       tone: '친절하고 공손한 스타일',
       color: '#37352f',
-    };
-    setAiAgents(prev => [...prev, newAgent]);
+    });
+    const nextAgents = [...aiAgents, newAgent];
+    setAiAgents(nextAgents);
+
+    if (currentUser) {
+      try {
+        await persistAiAgentsForUser(currentUser.id, nextAgents);
+      } catch (error) {
+        console.error('Failed to persist added AI persona:', error);
+      }
+    }
   };
 
-  const updateAiAgent = (id: string, updates: Partial<AIAgent>) => {
-    setAiAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+  const updateAiAgent = async (id: string, updates: Partial<AIAgent>) => {
+    const nextAgents = aiAgents.map(a => a.id === id ? normalizeAIAgent({ ...a, ...updates }) : a);
+    setAiAgents(nextAgents);
+
+    if (currentUser) {
+      try {
+        await persistAiAgentsForUser(currentUser.id, nextAgents);
+      } catch (error) {
+        console.error('Failed to persist updated AI persona:', error);
+      }
+    }
   };
 
-  const deleteAiAgent = (id: string) => {
+  const deleteAiAgent = async (id: string) => {
     const agent = aiAgents.find(a => a.id === id);
     if (!agent) return;
 
     if (window.confirm(`'${agent.name}' 페르소나를 삭제하시겠습니까? 관련 게시글은 삭제되지 않습니다.`)) {
-      setAiAgents(prev => prev.filter(a => a.id !== id));
+      const nextAgents = aiAgents.filter(a => a.id !== id);
+      setAiAgents(nextAgents);
       if (selectedAiAgentId === id) {
         setSelectedAiAgentId(aiAgents.find(a => a.id !== id)?.id || '');
+      }
+
+      if (currentUser) {
+        try {
+          await persistAiAgentsForUser(currentUser.id, nextAgents);
+        } catch (error) {
+          console.error('Failed to persist deleted AI persona:', error);
+        }
       }
     }
   };
@@ -900,18 +1230,23 @@ const App: React.FC = () => {
     if (currentUser) {
       try {
         const userId = currentUser.id;
-        const deleteOps = await Promise.all([
-          supabase.from('community_posts').delete().eq('user_id', userId),
-          supabase.from('calendar_events').delete().eq('user_id', userId),
-          supabase.from('journal_entries').delete().eq('user_id', userId),
-          supabase.from('todos').delete().eq('user_id', userId),
-          supabase.from('todo_lists').delete().eq('user_id', userId),
-        ]);
+        const safeDeleteByUser = async (table: string) => {
+          const result = await supabase.from(table).delete().eq('user_id', userId);
+          if (result.error && result.error.code !== '42P01') {
+            throw result.error;
+          }
+        };
 
-        const failed = deleteOps.find(result => result.error);
-        if (failed?.error) {
-          throw failed.error;
-        }
+        await Promise.all([
+          safeDeleteByUser('ai_trigger_queue'),
+          safeDeleteByUser('ai_agent_rotations'),
+          safeDeleteByUser('ai_agents'),
+          safeDeleteByUser('community_posts'),
+          safeDeleteByUser('calendar_events'),
+          safeDeleteByUser('journal_entries'),
+          safeDeleteByUser('todos'),
+          safeDeleteByUser('todo_lists'),
+        ]);
       } catch (error) {
         console.error('Failed to clear remote records:', error);
         alert('서버 기록 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
@@ -925,11 +1260,12 @@ const App: React.FC = () => {
     setEntries([]);
     setPosts([]);
     setCommunityPosts([]);
+    setAiAgents(DEFAULT_AGENTS);
     setActivityLog([]);
     setSelectedJournalId(null);
     setSelectedAiPostId(null);
 
-    ['ls_events', 'ls_todos', 'ls_entries', 'ls_posts', 'ls_community', 'ls_activity', 'ls_userName', 'ls_todo_lists'].forEach(key => {
+    ['ls_events', 'ls_todos', 'ls_entries', 'ls_posts', 'ls_community', 'ls_activity', 'ls_userName', 'ls_todo_lists', 'ls_agents'].forEach(key => {
       localStorage.removeItem(key);
     });
   };
@@ -1241,25 +1577,39 @@ const App: React.FC = () => {
   };
 
   const requestAiCommentForEntry = (entry: Pick<JournalEntry, 'id' | 'title' | 'content' | 'mood'>) => {
-    import('./utils/triggerEngine').then(({ generateJournalComment }) => {
-      generateJournalComment(
-        { title: entry.title, content: entry.content, mood: entry.mood },
-        events,
-        todos,
-        aiAgents,
-        (comment) => addJournalComment(entry.id, comment),
-        activeGeminiConfig?.apiKey,
-        (stats) => setSettings(prev => ({
-          ...prev,
-          apiUsage: {
-            totalRequests: (prev.apiUsage?.totalRequests || 0) + stats.totalRequests,
-            totalTokens: (prev.apiUsage?.totalTokens || 0) + stats.totalTokens,
-            lastRequestDate: stats.lastRequestDate,
-          }
-        })),
-        activeGeminiConfig?.modelName
-      );
-    });
+    if (!settings.autoAiReactions || !activeGeminiConfig?.apiKey) return;
+    if (pendingJournalAiCommentIdsRef.current.has(entry.id)) return;
+
+    const existingEntry = entries.find(e => e.id === entry.id);
+    if (existingEntry?.comments && existingEntry.comments.length > 0) return;
+
+    pendingJournalAiCommentIdsRef.current.add(entry.id);
+    import('./utils/triggerEngine')
+      .then(({ generateJournalComment }) =>
+        generateJournalComment(
+          { title: entry.title, content: entry.content, mood: entry.mood },
+          events,
+          todos,
+          aiAgents,
+          (comment) => addJournalComment(entry.id, comment),
+          activeGeminiConfig.apiKey,
+          (stats) => setSettings(prev => ({
+            ...prev,
+            apiUsage: {
+              totalRequests: (prev.apiUsage?.totalRequests || 0) + stats.totalRequests,
+              totalTokens: (prev.apiUsage?.totalTokens || 0) + stats.totalTokens,
+              lastRequestDate: stats.lastRequestDate,
+            }
+          })),
+          activeGeminiConfig.modelName
+        )
+      )
+      .catch((error) => {
+        console.error('Failed to load triggerEngine for AI comment:', error);
+      })
+      .finally(() => {
+        pendingJournalAiCommentIdsRef.current.delete(entry.id);
+      });
   };
 
   const addEntry = async (title: string, content: string, category: string = '메모장', mood: string = 'neutral') => {
@@ -1278,25 +1628,14 @@ const App: React.FC = () => {
     const entryWithOrder = { ...newEntry, order: newOrder };
 
     setEntries(prev => [entryWithOrder, ...prev]);
-
-    if (currentUser) {
-      await supabase.from('journal_entries').insert([{
-        id: newEntry.id,
-        user_id: currentUser.id,
-        title,
-        content,
-        category_id: categoryObj?.id,
-        mood: newEntry.mood,
-        date: newEntry.date,
-        "order": newOrder
-      }]);
-    }
+    setSelectedJournalId(newEntry.id); // 즉시 새 메모 선택
 
     logActivity({
       type: 'journal_added',
       label: `일기 기록: ${title}`,
       meta: { id: newEntry.id, mood, title },
     });
+
     showUndo('일기가 기록됨', async () => {
       setEntries(prev => prev.filter(e => e.id !== newEntry.id));
       if (currentUser) {
@@ -1309,6 +1648,7 @@ const App: React.FC = () => {
       });
     });
 
+    // AI 트리거 (비차단형으로 실행)
     triggerAI({
       trigger: 'journal_added',
       data: {
@@ -1316,13 +1656,29 @@ const App: React.FC = () => {
       },
     });
 
-    // Auto-request AI comment immediately with freshly created entry payload.
+    // AI 댓글 요청 (상태 업데이트 전 데이터 직접 전달)
     requestAiCommentForEntry({
       id: newEntry.id,
       title: newEntry.title,
       content: newEntry.content,
       mood: newEntry.mood,
     });
+
+    // DB 저장은 비동기로 처리 (UI와 AI 반응을 방해하지 않음)
+    if (currentUser) {
+      supabase.from('journal_entries').insert([{
+        id: newEntry.id,
+        user_id: currentUser.id,
+        title,
+        content,
+        category_id: categoryObj?.id,
+        mood: newEntry.mood,
+        date: newEntry.date,
+        "order": newOrder
+      }]).then(({ error }) => {
+        if (error) console.error('Failed to sync entry to Supabase:', error);
+      });
+    }
   };
 
   const deleteEntry = async (id: string) => {
@@ -1413,7 +1769,18 @@ const App: React.FC = () => {
     setCalendarTags(prev => prev.filter(t => t.id !== id));
   };
 
-  const updateAgents = (agents: AIAgent[]) => setAiAgents(agents);
+  const updateAgents = async (agents: AIAgent[]) => {
+    const normalized = agents.map((agent, index) => normalizeAIAgent(agent, index));
+    setAiAgents(normalized);
+
+    if (currentUser) {
+      try {
+        await persistAiAgentsForUser(currentUser.id, normalized);
+      } catch (error) {
+        console.error('Failed to persist AI persona list:', error);
+      }
+    }
+  };
 
   const updateUser = async (updatedUser: User) => {
     setCurrentUser(updatedUser);
@@ -1509,6 +1876,22 @@ const App: React.FC = () => {
       case 'chat':
       default: {
         const activeSession = chatSessions.find(s => s.id === activeChatSessionId);
+        const activeAgentIdsForChat = dedupeAgentIds(activeChatAgentIds).filter(id =>
+          aiAgents.some(agent => agent.id === id)
+        );
+        const sessionAgentIds =
+          activeAgentIdsForChat.length > 0
+            ? activeAgentIdsForChat
+            : (aiAgents[0]?.id ? [aiAgents[0].id] : []);
+        const selectedChatAgents = sessionAgentIds
+          .map(id => aiAgents.find(agent => agent.id === id))
+          .filter(Boolean) as AIAgent[];
+        const personaMemoryContextByAgent = sessionAgentIds.reduce((acc, agentId) => {
+          const memory = buildPersonaMemoryContext(chatSessions, agentId, activeChatSessionId);
+          if (memory) acc[agentId] = memory;
+          return acc;
+        }, {} as Record<string, string>);
+
         return (
           <ChatView
             events={events}
@@ -1523,24 +1906,29 @@ const App: React.FC = () => {
             onAddPost={addPost}
             requireConfirm={settings.chatActionConfirm}
             settings={settings}
-            agent={aiAgents.find(a => a.id === activeChatAgentId) || aiAgents[0]}
+            agent={selectedChatAgents[0] || aiAgents[0]}
             agents={aiAgents}
-            onSelectAgent={(agentId) => {
-              setActiveChatAgentId(agentId);
-              const newId = crypto.randomUUID();
-              const newSession: ChatSession = {
-                id: newId,
-                title: '새 대화',
-                messages: [],
-                createdAt: new Date().toISOString(),
-                lastMessageAt: new Date().toISOString(),
-                agentId: agentId
-              };
-              setChatSessions(prev => [newSession, ...prev]);
-              setActiveChatSessionId(newId);
+            selectedAgentIds={sessionAgentIds}
+            selectedAgents={selectedChatAgents}
+            onSelectAgents={(agentIds) => {
+              const normalized = dedupeAgentIds(agentIds).filter(id => aiAgents.some(agent => agent.id === id));
+              const nextAgentIds = normalized.length > 0 ? normalized : (aiAgents[0]?.id ? [aiAgents[0].id] : []);
+              setActiveChatAgentIds(nextAgentIds);
+              if (activeChatSessionId) {
+                setChatSessions(prev => prev.map(session =>
+                  session.id === activeChatSessionId
+                    ? { ...session, agentId: nextAgentIds[0], agentIds: nextAgentIds }
+                    : session
+                ));
+              } else {
+                setActiveChatSessionId(null);
+              }
             }}
             onUpdateAgent={updateAiAgent}
             onUserMessage={(text) => {
+              const nextAgentIds = sessionAgentIds.length > 0
+                ? sessionAgentIds
+                : (aiAgents[0]?.id ? [aiAgents[0].id] : []);
               if (!activeChatSessionId) {
                 const newId = crypto.randomUUID();
                 const newSession: ChatSession = {
@@ -1549,19 +1937,29 @@ const App: React.FC = () => {
                   messages: [],
                   createdAt: new Date().toISOString(),
                   lastMessageAt: new Date().toISOString(),
-                  agentId: activeChatAgentId
+                  agentId: nextAgentIds[0],
+                  agentIds: nextAgentIds,
                 };
                 setChatSessions(prev => [newSession, ...prev]);
                 setActiveChatSessionId(newId);
+              } else {
+                setChatSessions(prev => prev.map(session =>
+                  session.id === activeChatSessionId
+                    ? { ...session, agentId: nextAgentIds[0], agentIds: nextAgentIds }
+                    : session
+                ));
               }
               appendChatObservation(text);
             }}
             initialMessages={activeSession?.messages}
             currentSessionId={activeChatSessionId}
+            personaMemoryContextByAgent={personaMemoryContextByAgent}
             onUpdateMessages={(sessionId: string, messages: ChatMessage[]) => {
-              setChatSessions((prev: ChatSession[]) => prev.map((s: ChatSession) => {
-                if (s.id === sessionId) {
-                  // Auto-generate title from first message if it's '새 대화'
+              setChatSessions((prev: ChatSession[]) => {
+                let changed = false;
+                const next = prev.map((s: ChatSession) => {
+                  if (s.id !== sessionId) return s;
+
                   let title = s.title;
                   if (title === '새 대화' && messages.length > 0) {
                     const firstUserMsg = messages.find((m: ChatMessage) => m.role === 'user');
@@ -1569,11 +1967,48 @@ const App: React.FC = () => {
                       title = firstUserMsg.content.slice(0, 20) + (firstUserMsg.content.length > 20 ? '...' : '');
                     }
                   }
+
                   const lastMsg = messages[messages.length - 1];
-                  return { ...s, messages, title, lastMessageAt: lastMsg?.timestamp || s.lastMessageAt };
-                }
-                return s;
-              }));
+                  const nextLastMessageAt = lastMsg?.timestamp || s.lastMessageAt;
+                  const messageAgentIds = dedupeAgentIds(
+                    messages
+                      .filter((message: ChatMessage) => message.role === 'assistant')
+                      .map((message: ChatMessage) => message.agentId)
+                  );
+                  const preservedAgentIds = dedupeAgentIds([
+                    ...(Array.isArray(s.agentIds) ? s.agentIds : []),
+                    s.agentId,
+                  ]);
+                  const mergedAgentIds = messageAgentIds.length > 0
+                    ? messageAgentIds
+                    : preservedAgentIds;
+                  const nextAgentId = mergedAgentIds[0] || s.agentId;
+                  const currentAgentIds = dedupeAgentIds([
+                    ...(Array.isArray(s.agentIds) ? s.agentIds : []),
+                  ]);
+                  const nextAgentIds = mergedAgentIds.length > 0 ? mergedAgentIds : currentAgentIds;
+
+                  const unchanged =
+                    isSameChatMessageList(s.messages, messages) &&
+                    s.title === title &&
+                    s.lastMessageAt === nextLastMessageAt &&
+                    s.agentId === nextAgentId &&
+                    isSameAgentIdList(currentAgentIds, nextAgentIds);
+
+                  if (unchanged) return s;
+                  changed = true;
+
+                  return {
+                    ...s,
+                    messages,
+                    title,
+                    lastMessageAt: nextLastMessageAt,
+                    agentId: nextAgentId,
+                    agentIds: nextAgentIds,
+                  };
+                });
+                return changed ? next : prev;
+              });
             }}
           />
         );
@@ -1584,19 +2019,11 @@ const App: React.FC = () => {
   const headerLabel =
     mobileNavItems.find(i => i.id === currentView)?.label ||
     (currentView === 'settings' ? '설정' : 'Dashboard');
+  const historySessions = chatSessions.filter((session: ChatSession) => hasUserChatMessage(session));
 
   const handleNewChat = () => {
-    const newId = crypto.randomUUID();
-    const newSession: ChatSession = {
-      id: newId,
-      title: '새 대화',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      lastMessageAt: new Date().toISOString(),
-      agentId: activeChatAgentId
-    };
-    setChatSessions(prev => [newSession, ...prev]);
-    setActiveChatSessionId(newId);
+    setActiveChatSessionId(null);
+    setActiveChatAgentIds(primaryActiveChatAgentId ? [primaryActiveChatAgentId] : []);
     setCurrentView('chat');
   };
 
@@ -1679,23 +2106,28 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 <div className="space-y-0.5 overflow-y-auto max-h-[400px] scrollbar-hide">
-                  {chatSessions.length === 0 ? (
+                  {historySessions.length === 0 ? (
                     <div className="px-3 py-2 text-[11px] text-[#9b9a97] italic">
                       진행 중인 대화가 없습니다.
                     </div>
                   ) : (
-                    chatSessions
-                      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                    historySessions
                       .slice(0, 5)
                       .map(session => (
                         <div key={session.id} className="group relative">
                           <button
                             onClick={() => {
-                              const inferredAgentId = session.agentId || inferAgentIdFromMessages(session.messages, aiAgents) || activeChatAgentId;
+                              const resolvedAgentIds = resolveSessionAgentIds(session, aiAgents, activeChatAgentIds);
                               setActiveChatSessionId(session.id);
-                              setActiveChatAgentId(inferredAgentId);
-                              if (!session.agentId) {
-                                setChatSessions(prev => prev.map(s => s.id === session.id ? { ...s, agentId: inferredAgentId } : s));
+                              setActiveChatAgentIds(resolvedAgentIds);
+                              const normalizedSessionIds = dedupeAgentIds([
+                                ...(Array.isArray(session.agentIds) ? session.agentIds : []),
+                                session.agentId,
+                              ]);
+                              if (session.agentId !== resolvedAgentIds[0] || !isSameAgentIdList(normalizedSessionIds, resolvedAgentIds)) {
+                                setChatSessions(prev => prev.map(s => s.id === session.id
+                                  ? { ...s, agentId: resolvedAgentIds[0], agentIds: resolvedAgentIds }
+                                  : s));
                               }
                             }}
                             className={`w-full text-left px-3 py-1.5 rounded-[4px] transition-colors text-sm group ${activeChatSessionId === session.id
@@ -2167,18 +2599,7 @@ const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      const newId = crypto.randomUUID();
-                      const newSession: ChatSession = {
-                        id: newId,
-                        title: '새 대화',
-                        messages: [],
-                        createdAt: new Date().toISOString(),
-                        lastMessageAt: new Date().toISOString(),
-                        agentId: activeChatAgentId
-                      };
-                      setChatSessions(prev => [newSession, ...prev]);
-                      setActiveChatSessionId(newId);
-                      setCurrentView('chat');
+                      handleNewChat();
                       setIsMobileMenuOpen(false);
                     }}
                     className="p-1 rounded-md border border-[#e9e9e8] text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
@@ -2188,22 +2609,27 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 <div className="space-y-1 max-h-52 overflow-y-auto">
-                  {chatSessions.length === 0 ? (
+                  {historySessions.length === 0 ? (
                     <div className="px-2 py-2 text-xs text-[#9b9a97]">저장된 대화가 없습니다.</div>
                   ) : (
-                    [...chatSessions]
-                      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+                    historySessions
                       .slice(0, 12)
                       .map((session) => (
                         <div key={session.id} className="group flex items-center gap-1">
                           <button
                             type="button"
                             onClick={() => {
-                              const inferredAgentId = session.agentId || inferAgentIdFromMessages(session.messages, aiAgents) || activeChatAgentId;
+                              const resolvedAgentIds = resolveSessionAgentIds(session, aiAgents, activeChatAgentIds);
                               setActiveChatSessionId(session.id);
-                              setActiveChatAgentId(inferredAgentId);
-                              if (!session.agentId) {
-                                setChatSessions(prev => prev.map(s => s.id === session.id ? { ...s, agentId: inferredAgentId } : s));
+                              setActiveChatAgentIds(resolvedAgentIds);
+                              const normalizedSessionIds = dedupeAgentIds([
+                                ...(Array.isArray(session.agentIds) ? session.agentIds : []),
+                                session.agentId,
+                              ]);
+                              if (session.agentId !== resolvedAgentIds[0] || !isSameAgentIdList(normalizedSessionIds, resolvedAgentIds)) {
+                                setChatSessions(prev => prev.map(s => s.id === session.id
+                                  ? { ...s, agentId: resolvedAgentIds[0], agentIds: resolvedAgentIds }
+                                  : s));
                               }
                               setCurrentView('chat');
                               setIsMobileMenuOpen(false);

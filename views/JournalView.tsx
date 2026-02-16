@@ -62,6 +62,7 @@ const JournalView: React.FC<JournalViewProps> = ({
   const [isListOpen, setIsListOpen] = useState(true);
   const [visibleRows, setVisibleRows] = useState(5);
   const actionMenuRef = useRef<HTMLDivElement>(null);
+  const triedAiRef = useRef<Set<string>>(new Set());
 
   // Write Form State
   const [newTitle, setNewTitle] = useState('');
@@ -98,6 +99,17 @@ const JournalView: React.FC<JournalViewProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Fail-safe: Auto-request AI comment if missing
+  const selectedEntry = (entries || []).find(e => e.id === selectedId);
+  useEffect(() => {
+    if (selectedEntry && (!selectedEntry.comments || selectedEntry.comments.length === 0)) {
+      if (!triedAiRef.current.has(selectedEntry.id)) {
+        onRequestAiComment(selectedEntry.id);
+        triedAiRef.current.add(selectedEntry.id);
+      }
+    }
+  }, [selectedId, selectedEntry, onRequestAiComment]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -158,7 +170,6 @@ const JournalView: React.FC<JournalViewProps> = ({
     }
   };
 
-  const selectedEntry = (entries || []).find(e => e.id === selectedId);
 
   return (
     <div className="flex flex-col h-full bg-white relative">
@@ -356,16 +367,16 @@ const JournalView: React.FC<JournalViewProps> = ({
 
                   {/* AI Comment Section */}
                   <div className="pt-16 border-t border-[#f1f1f0] space-y-10">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <MessageSquare size={20} className="text-[#37352f]" />
-                        <h3 className="text-lg font-medium tracking-tight">AI의 반응 ({selectedEntry.comments?.length || 0})</h3>
-                      </div>
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#9b9a97] bg-[#f7f7f5] rounded-lg">
-                        <Sparkles size={12} />
-                        AI가 글을 읽고 있습니다...
-                      </div>
+                    <div className="flex items-center gap-2.5">
+                      <MessageSquare size={20} className="text-[#37352f]" />
+                      <h3 className="text-lg font-medium tracking-tight">AI의 반응 ({selectedEntry.comments?.length || 0})</h3>
                     </div>
+                    {(!selectedEntry.comments || selectedEntry.comments.length === 0) && (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#9b9a97] bg-[#f7f7f5] rounded-lg animate-pulse">
+                        <Sparkles size={12} />
+                        AI가 분석하고 있습니다...
+                      </div>
+                    )}
 
                     {selectedEntry.comments && selectedEntry.comments.length > 0 ? (
                       <div className="space-y-8">

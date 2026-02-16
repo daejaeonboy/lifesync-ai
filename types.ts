@@ -110,7 +110,7 @@ export interface ActivityItem {
 export interface ApiConnection {
   id: string;
   provider: 'gemini' | 'openai' | 'anthropic' | 'custom';
-  modelName: string; // e.g. "gemini-1.5-flash", "gpt-4"
+  modelName: string; // e.g. "gemini-3-flash-preview", "gpt-4"
   apiKey: string;
   isActive: boolean;
 }
@@ -143,6 +143,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string; // ISO string
+  agentId?: string; // assistant persona id for multi-persona chat
   action?: {
     type: 'add_event' | 'delete_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
     data?: any;
@@ -158,6 +159,7 @@ export interface ChatSession {
   createdAt: string;
   lastMessageAt: string;
   agentId?: string; // ID of the AI agent for this session
+  agentIds?: string[]; // selected AI agent ids for this session (group chat)
 }
 
 export type ChatMode = 'basic' | 'roleplay' | 'learning';

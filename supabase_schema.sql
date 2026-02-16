@@ -95,3 +95,6 @@ create policy "Users can manage own journal categories" on journal_categories fo
 create policy "Users can manage own journal entries" on journal_entries for all using (auth.uid() = user_id);
 create policy "Users can manage own events" on calendar_events for all using (auth.uid() = user_id);
 create policy "Users can manage own posts" on community_posts for all using (auth.uid() = user_id);
+
+-- Server-side AI automation objects (queue/ai_agents/triggers) are defined in:
+-- supabase/migrations/20260215_server_ai_triggers.sql

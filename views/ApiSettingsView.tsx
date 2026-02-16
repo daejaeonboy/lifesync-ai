@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AppSettings, ApiConnection } from '../types';
 import { Trash2, Plus, X, CheckCircle2, Circle, FlaskConical } from 'lucide-react';
 import { callGeminiAPI } from '../utils/gemini';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS } from '../utils/aiConfig';
+import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, normalizeGeminiModelName } from '../utils/aiConfig';
 
 interface ApiSettingsViewProps {
     settings: AppSettings;
@@ -34,14 +34,20 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
     }, [connections, settings.activeConnectionId]);
 
     const persistConnections = (nextConnections: ApiConnection[], preferredId?: string) => {
-        const resolvedId =
-            preferredId && nextConnections.some(c => c.id === preferredId)
-                ? preferredId
-                : settings.activeConnectionId && nextConnections.some(c => c.id === settings.activeConnectionId)
-                    ? settings.activeConnectionId
-                    : nextConnections.find(c => c.isActive)?.id || nextConnections[0]?.id;
+        const normalizedConnections = nextConnections.map(connection =>
+            connection.provider === 'gemini'
+                ? { ...connection, modelName: normalizeGeminiModelName(connection.modelName) }
+                : connection
+        );
 
-        const normalized = nextConnections.map(c => ({
+        const resolvedId =
+            preferredId && normalizedConnections.some(c => c.id === preferredId)
+                ? preferredId
+                : settings.activeConnectionId && normalizedConnections.some(c => c.id === settings.activeConnectionId)
+                    ? settings.activeConnectionId
+                    : normalizedConnections.find(c => c.isActive)?.id || normalizedConnections[0]?.id;
+
+        const normalized = normalizedConnections.map(c => ({
             ...c,
             isActive: c.id === resolvedId,
         }));
@@ -60,7 +66,7 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
 
     const updateConnectionModel = (connectionId: string, modelName: string) => {
         const updated = connections.map(conn =>
-            conn.id === connectionId ? { ...conn, modelName } : conn
+            conn.id === connectionId ? { ...conn, modelName: normalizeGeminiModelName(modelName) } : conn
         );
         persistConnections(updated);
     };
@@ -75,7 +81,7 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
         const connection: ApiConnection = {
             id: crypto.randomUUID(),
             provider,
-            modelName,
+            modelName: provider === 'gemini' ? normalizeGeminiModelName(modelName) : modelName,
             apiKey,
             isActive: true,
         };
@@ -352,4 +358,3 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
 };
 
 export default ApiSettingsView;
-

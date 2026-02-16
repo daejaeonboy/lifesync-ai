@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CalendarEvent, Todo, JournalEntry, AiPost, TodoList, AppSettings, AIAgent, ChatMessage, ChatMode } from '../types';
-import { generateLifeInsight, generateChatResponse, detectChatAction, analyzePersonaUpdate, ChatActionResult } from '../services/geminiService';
+import { generateLifeInsight, generateChatResponse, ChatActionResult } from '../services/geminiService';
 import { Sparkles, ChevronRight, Plus } from '../components/Icons';
 import { format, parseISO, isSameDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -22,13 +22,138 @@ interface ChatViewProps {
     onUpdateSettings?: (settings: AppSettings) => void;
     agent?: AIAgent;
     agents?: AIAgent[];
-    onSelectAgent?: (id: string) => void;
+    selectedAgentIds?: string[];
+    selectedAgents?: AIAgent[];
+    onSelectAgents?: (ids: string[]) => void;
     onUpdateAgent?: (agentId: string, updates: Partial<AIAgent>) => void;
     onUserMessage?: (text: string) => void;
     initialMessages?: ChatMessage[];
     onUpdateMessages?: (sessionId: string, messages: ChatMessage[]) => void;
     currentSessionId?: string | null;
+    personaMemoryContext?: string;
+    personaMemoryContextByAgent?: Record<string, string>;
 }
+
+const CHAT_HISTORY_LIMIT = 12;
+const MAX_GROUP_AGENTS = 4;
+
+const isSameChatMessageList = (a: ChatMessage[], b: ChatMessage[]): boolean => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+
+    for (let i = 0; i < a.length; i += 1) {
+        const left = a[i];
+        const right = b[i];
+        if (
+            left.id !== right.id ||
+            left.role !== right.role ||
+            left.content !== right.content ||
+            left.timestamp !== right.timestamp ||
+            left.agentId !== right.agentId
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const renderInlineBold = (text: string, keyPrefix: string): React.ReactNode => {
+    const chunks = text.split(/(\*\*[^*]+\*\*)/g);
+    return chunks.map((chunk, idx) => {
+        const match = chunk.match(/^\*\*(.+)\*\*$/);
+        if (!match) return <React.Fragment key={`${keyPrefix}-${idx}`}>{chunk}</React.Fragment>;
+        return <strong key={`${keyPrefix}-${idx}`} className="font-semibold">{match[1]}</strong>;
+    });
+};
+
+const renderRichMessage = (content: string): React.ReactNode => {
+    const lines = (content || '').split('\n');
+    const nodes: React.ReactNode[] = [];
+    let i = 0;
+    let key = 0;
+
+    const pushParagraph = (paragraphLines: string[]) => {
+        const text = paragraphLines.join('\n').trim();
+        if (!text) return;
+        nodes.push(
+            <p key={`p-${key++}`} className="whitespace-pre-wrap leading-relaxed">
+                {renderInlineBold(text, `p-${key}`)}
+            </p>
+        );
+    };
+
+    while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            nodes.push(<div key={`sp-${key++}`} className="h-2" />);
+            i += 1;
+            continue;
+        }
+
+        const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+        if (heading) {
+            const level = heading[1].length;
+            const headingClass =
+                level === 1 ? 'text-base font-bold' : level === 2 ? 'text-[15px] font-semibold' : 'text-sm font-semibold';
+            nodes.push(
+                <div key={`h-${key++}`} className={headingClass}>
+                    {renderInlineBold(heading[2], `h-${key}`)}
+                </div>
+            );
+            i += 1;
+            continue;
+        }
+
+        if (/^[-*]\s+/.test(trimmed)) {
+            const items: string[] = [];
+            while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+                items.push(lines[i].trim().replace(/^[-*]\s+/, ''));
+                i += 1;
+            }
+            nodes.push(
+                <ul key={`ul-${key++}`} className="list-disc pl-5 space-y-1">
+                    {items.map((item, idx) => (
+                        <li key={`uli-${key}-${idx}`}>{renderInlineBold(item, `uli-${key}-${idx}`)}</li>
+                    ))}
+                </ul>
+            );
+            continue;
+        }
+
+        if (/^\d+\.\s+/.test(trimmed)) {
+            const items: string[] = [];
+            while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+                items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+                i += 1;
+            }
+            nodes.push(
+                <ol key={`ol-${key++}`} className="list-decimal pl-5 space-y-1">
+                    {items.map((item, idx) => (
+                        <li key={`oli-${key}-${idx}`}>{renderInlineBold(item, `oli-${key}-${idx}`)}</li>
+                    ))}
+                </ol>
+            );
+            continue;
+        }
+
+        const paragraphLines: string[] = [];
+        while (i < lines.length) {
+            const current = lines[i].trim();
+            if (!current || /^(#{1,3})\s+/.test(current) || /^[-*]\s+/.test(current) || /^\d+\.\s+/.test(current)) {
+                break;
+            }
+            paragraphLines.push(lines[i]);
+            i += 1;
+        }
+        pushParagraph(paragraphLines);
+    }
+
+    return <div className="space-y-1">{nodes}</div>;
+};
 
 // Helper: Get time-based greeting
 const getTimeBasedGreeting = (): string => {
@@ -80,12 +205,16 @@ const ChatView: React.FC<ChatViewProps> = ({
     onUpdateSettings,
     agent,
     agents = [],
-    onSelectAgent,
+    selectedAgentIds = [],
+    selectedAgents = [],
+    onSelectAgents,
     onUpdateAgent,
     onUserMessage,
     initialMessages,
     onUpdateMessages,
     currentSessionId,
+    personaMemoryContext,
+    personaMemoryContextByAgent = {},
 }) => {
     const activeGeminiConfig = getActiveGeminiConfig(settings);
 
@@ -101,6 +230,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 role: 'assistant',
                 content: `${getTimeBasedGreeting()}\n\n처음 오셨네요! 저는 ${agent?.name || 'LifeSync AI'}예요. ${agent?.emoji || '💬'}\n당신의 일상을 함께 정리하고 더 나은 하루를 만들어 드릴게요.\n\n먼저, 뭐라고 불러드리면 될까요?`,
                 timestamp: new Date().toISOString(),
+                agentId: agent?.id,
                 action: { type: 'onboarding' },
             };
         }
@@ -111,6 +241,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             role: 'assistant',
             content: `주인님, ${getTimeBasedGreeting()}\n\n${getTodaySummary(events, todos)}\n\n무엇을 도와드릴까요?`,
             timestamp: new Date().toISOString(),
+            agentId: agent?.id,
             quickReplies: ['오늘 일정 알려줘', '할 일 추가', '오늘 기분 기록', '주간 분석해줘'],
         };
     };
@@ -123,14 +254,39 @@ const ChatView: React.FC<ChatViewProps> = ({
     const [isProcessing, setIsProcessing] = useState(false);
     const [chatMode, setChatMode] = useState<ChatMode>('basic');
     const [showToolbar, setShowToolbar] = useState(false);
+    const [isMultiSelectEnabled, setIsMultiSelectEnabled] = useState(false);
     const [conversationContext, setConversationContext] = useState<string[]>([]); // For context awareness
     const [pendingAction, setPendingAction] = useState<ChatMessage['action'] | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const pendingSessionHydrationRef = useRef(false);
+    const lastSyncedSignatureRef = useRef<string>('');
     const availableAgents = agents.length > 0 ? agents : (agent ? [agent] : []);
+    const selectedAgentPool = selectedAgents.length > 0
+        ? selectedAgents
+        : (selectedAgentIds.length > 0
+            ? selectedAgentIds
+                .map((id) => availableAgents.find((availableAgent) => availableAgent.id === id))
+                .filter(Boolean) as AIAgent[]
+            : (agent ? [agent] : availableAgents.slice(0, 1)));
+    const activeAgents = selectedAgentPool.length > 0
+        ? selectedAgentPool.slice(0, MAX_GROUP_AGENTS)
+        : (availableAgents.length > 0 ? [availableAgents[0]] : []);
+    const primaryAgent = activeAgents[0] || agent || availableAgents[0];
     const chatModeLabels: Record<ChatMode, string> = {
         basic: '기본',
         roleplay: '롤플레잉',
         learning: '학습',
+    };
+
+    useEffect(() => {
+        setIsMultiSelectEnabled(selectedAgentIds.length > 1);
+    }, [selectedAgentIds]);
+    const getAgentForMessage = (message: ChatMessage): AIAgent | undefined => {
+        if (message.role !== 'assistant') return undefined;
+        if (message.agentId) {
+            return availableAgents.find((availableAgent) => availableAgent.id === message.agentId) || primaryAgent;
+        }
+        return primaryAgent;
     };
 
     const scrollToBottom = () => {
@@ -144,23 +300,49 @@ const ChatView: React.FC<ChatViewProps> = ({
     // Update messages when switching sessions
     useEffect(() => {
         if (currentSessionId) {
+            // When the very first user message creates a new session in parent state,
+            // keep local messages instead of resetting to welcome text.
+            if (pendingSessionHydrationRef.current && (!initialMessages || initialMessages.length === 0)) {
+                pendingSessionHydrationRef.current = false;
+                return;
+            }
+
             if (initialMessages && initialMessages.length > 0) {
-                setMessages(initialMessages);
+                setMessages(prev => (isSameChatMessageList(prev, initialMessages) ? prev : initialMessages));
             } else {
                 // New empty session should start from a fresh welcome message.
-                setMessages([getWelcomeMessage()]);
+                setMessages(prev => {
+                    const isAlreadyWelcome =
+                        prev.length === 1 &&
+                        prev[0].role === 'assistant' &&
+                        (prev[0].id === 'welcome' || prev[0].id === 'onboarding-1');
+                    return isAlreadyWelcome ? prev : [getWelcomeMessage()];
+                });
             }
         } else {
             // No session - reset to welcome
-            setMessages([getWelcomeMessage()]);
+            setMessages(prev => {
+                const isAlreadyWelcome =
+                    prev.length === 1 &&
+                    prev[0].role === 'assistant' &&
+                    (prev[0].id === 'welcome' || prev[0].id === 'onboarding-1');
+                return isAlreadyWelcome ? prev : [getWelcomeMessage()];
+            });
         }
-    }, [currentSessionId]);
+    }, [currentSessionId, initialMessages]);
 
     // Notify parent of message updates
     useEffect(() => {
-        if (currentSessionId && onUpdateMessages && messages.length > 1) {
-            onUpdateMessages(currentSessionId, messages);
-        }
+        if (!currentSessionId || !onUpdateMessages || messages.length <= 1) return;
+
+        // Session switch hydration should not immediately write back identical payloads.
+        if (initialMessages && isSameChatMessageList(messages, initialMessages)) return;
+
+        const signature = `${currentSessionId}:${messages.map(m => `${m.id}:${m.timestamp}`).join('|')}`;
+        if (lastSyncedSignatureRef.current === signature) return;
+        lastSyncedSignatureRef.current = signature;
+
+        onUpdateMessages(currentSessionId, messages);
     }, [messages, currentSessionId]);
 
     // Save username to localStorage
@@ -291,25 +473,6 @@ const ChatView: React.FC<ChatViewProps> = ({
         return null;
     };
 
-    const requestBackgroundPersonaUpdate = (history: { role: 'user' | 'assistant'; content: string }[]) => {
-        if (!activeGeminiConfig?.apiKey || !agent || !onUpdateAgent) return;
-
-        analyzePersonaUpdate(
-            activeGeminiConfig.apiKey,
-            history,
-            agent,
-            activeGeminiConfig.modelName
-        )
-            .then((updates) => {
-                if (updates) {
-                    onUpdateAgent(agent.id, updates);
-                }
-            })
-            .catch((error) => {
-                console.error('Background persona update failed:', error);
-            });
-    };
-
     const executeAction = async (action: ChatMessage['action']) => {
         if (!action) return;
 
@@ -381,6 +544,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                         role: 'assistant',
                         content: activeGeminiConfig?.apiKey ? 'AI 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 😢' : 'AI 분석을 하려면 먼저 **설정 > API 연결 설정**에서 Gemini API와 모델을 선택해주세요! 🔑',
                         timestamp: new Date().toISOString(),
+                        agentId: primaryAgent?.id,
                         quickReplies: ['설정하러 갈래', '괜찮아']
                     };
                     setMessages(prev => [...prev, errorMessage]);
@@ -520,9 +684,13 @@ const ChatView: React.FC<ChatViewProps> = ({
         const isCancel = Boolean(pendingAction) && cancelKeywords.includes(normalizedMessage);
 
         if (!isConfirm && !isCancel) {
+            if (!currentSessionId) {
+                pendingSessionHydrationRef.current = true;
+            }
             try {
                 onUserMessage?.(trimmedMessage);
             } catch (error) {
+                pendingSessionHydrationRef.current = false;
                 console.error('onUserMessage callback failed:', error);
             }
         }
@@ -540,10 +708,8 @@ const ChatView: React.FC<ChatViewProps> = ({
 
         // Update conversation context for awareness
         setConversationContext(prev => [...prev.slice(-4), messageText]);
-        const historyForPersona = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
-        if (trimmedMessage.length >= 8) {
-            requestBackgroundPersonaUpdate(historyForPersona);
-        }
+        const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }));
+        const historyForChat = history.slice(-CHAT_HISTORY_LIMIT);
 
         // Keep artificial delay minimal when API is available.
         const delayMs = activeGeminiConfig?.apiKey ? 80 : 350;
@@ -557,6 +723,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                     role: 'assistant',
                     content: '알겠어요. 요청은 취소했어요.',
                     timestamp: new Date().toISOString(),
+                    agentId: primaryAgent?.id,
                     quickReplies: ['다른 요청 하기', '오늘 일정 알려줘', '할 일 추가'],
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
@@ -571,6 +738,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 role: 'assistant',
                 content: confirmedResponse.content,
                 timestamp: new Date().toISOString(),
+                agentId: primaryAgent?.id,
                 action: { ...pendingAction, executed: true },
                 quickReplies: confirmedResponse.quickReplies,
             };
@@ -586,6 +754,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 role: 'assistant',
                 content: '확인을 기다리고 있어요. `실행` 또는 `취소` 중 하나로 답해주세요.',
                 timestamp: new Date().toISOString(),
+                agentId: primaryAgent?.id,
                 quickReplies: ['실행', '취소'],
             };
             setMessages((prev) => [...prev, assistantMessage]);
@@ -602,6 +771,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 role: 'assistant',
                 content: response.content,
                 timestamp: new Date().toISOString(),
+                agentId: primaryAgent?.id,
                 action: { ...onboardingAction, executed: true },
                 quickReplies: response.quickReplies,
             };
@@ -612,117 +782,168 @@ const ChatView: React.FC<ChatViewProps> = ({
 
         if (activeGeminiConfig?.apiKey) {
             try {
-                const history = historyForPersona;
-                const detectedAction = await detectChatAction(
-                    activeGeminiConfig.apiKey,
-                    history,
-                    events,
-                    userName,
-                    activeGeminiConfig.modelName
-                );
-                const mappedAction = mapGeminiActionToChatAction(detectedAction);
-                if (!mappedAction && detectedAction?.type === 'delete_event') {
-                    const assistantMessage: ChatMessage = {
-                        id: crypto.randomUUID(),
-                        role: 'assistant',
-                        content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
-                        timestamp: new Date().toISOString(),
-                        quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
-                    };
-                    setMessages((prev) => [...prev, assistantMessage]);
-                    setIsProcessing(false);
-                    return;
-                }
+                const history = historyForChat;
+                if (activeAgents.length > 1) {
+                    let rollingHistory = [...history];
 
-                if (mappedAction) {
-                    if (requiresConfirmation(mappedAction)) {
-                        setPendingAction(mappedAction);
-                        const prompt = buildConfirmationPrompt(mappedAction);
-                        const assistantMessage: ChatMessage = {
-                            id: crypto.randomUUID(),
-                            role: 'assistant',
-                            content: prompt.content,
-                            timestamp: new Date().toISOString(),
-                            action: mappedAction,
-                            quickReplies: prompt.quickReplies,
-                        };
-                        setMessages((prev) => [...prev, assistantMessage]);
-                    } else {
-                        await executeAction(mappedAction);
-                        const response = getResponseForAction(mappedAction, messageText);
-                        const assistantMessage: ChatMessage = {
-                            id: crypto.randomUUID(),
-                            role: 'assistant',
-                            content: response.content,
-                            timestamp: new Date().toISOString(),
-                            action: { ...mappedAction, executed: true },
-                            quickReplies: response.quickReplies,
-                        };
-                        setMessages((prev) => [...prev, assistantMessage]);
-                    }
-                    setIsProcessing(false);
-                    return;
-                }
+                    for (let index = 0; index < activeAgents.length; index += 1) {
+                        const currentAgent = activeAgents[index];
+                        const currentMemory =
+                            personaMemoryContextByAgent?.[currentAgent.id]
+                            || (currentAgent.id === primaryAgent?.id ? personaMemoryContext : '');
 
-                const result = await generateChatResponse(
-                    activeGeminiConfig.apiKey,
-                    history,
-                    events,
-                    todos,
-                    entries,
-                    userName,
-                    activeGeminiConfig.modelName,
-                    agent,
-                    chatMode
-                );
+                        const result = await generateChatResponse(
+                            activeGeminiConfig.apiKey,
+                            rollingHistory,
+                            events,
+                            todos,
+                            entries,
+                            userName,
+                            activeGeminiConfig.modelName,
+                            currentAgent,
+                            chatMode,
+                            currentMemory
+                        );
 
-                const fallbackAction = mapGeminiActionToChatAction(result.action);
-                if (!fallbackAction && result.action?.type === 'delete_event') {
-                    const assistantMessage: ChatMessage = {
-                        id: crypto.randomUUID(),
-                        role: 'assistant',
-                        content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
-                        timestamp: new Date().toISOString(),
-                        quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
-                    };
-                    setMessages((prev) => [...prev, assistantMessage]);
-                    setIsProcessing(false);
-                    return;
-                }
-                if (fallbackAction) {
-                    if (requiresConfirmation(fallbackAction)) {
-                        setPendingAction(fallbackAction);
-                        const prompt = buildConfirmationPrompt(fallbackAction);
-                        const assistantMessage: ChatMessage = {
-                            id: crypto.randomUUID(),
-                            role: 'assistant',
-                            content: prompt.content,
-                            timestamp: new Date().toISOString(),
-                            action: fallbackAction,
-                            quickReplies: prompt.quickReplies,
-                        };
+                        let assistantMessage: ChatMessage;
+                        if (index === 0) {
+                            const fallbackAction = mapGeminiActionToChatAction(result.action);
+
+                            if (!fallbackAction && result.action?.type === 'delete_event') {
+                                assistantMessage = {
+                                    id: crypto.randomUUID(),
+                                    role: 'assistant',
+                                    content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
+                                    timestamp: new Date().toISOString(),
+                                    agentId: currentAgent.id,
+                                    quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
+                                };
+                            } else if (fallbackAction) {
+                                if (requiresConfirmation(fallbackAction)) {
+                                    setPendingAction(fallbackAction);
+                                    const prompt = buildConfirmationPrompt(fallbackAction);
+                                    assistantMessage = {
+                                        id: crypto.randomUUID(),
+                                        role: 'assistant',
+                                        content: prompt.content,
+                                        timestamp: new Date().toISOString(),
+                                        agentId: currentAgent.id,
+                                        action: fallbackAction,
+                                        quickReplies: prompt.quickReplies,
+                                    };
+                                } else {
+                                    await executeAction(fallbackAction);
+                                    const response = getResponseForAction(fallbackAction, messageText);
+                                    assistantMessage = {
+                                        id: crypto.randomUUID(),
+                                        role: 'assistant',
+                                        content: response.content,
+                                        timestamp: new Date().toISOString(),
+                                        agentId: currentAgent.id,
+                                        action: { ...fallbackAction, executed: true },
+                                        quickReplies: response.quickReplies,
+                                    };
+                                }
+                            } else {
+                                assistantMessage = {
+                                    id: crypto.randomUUID(),
+                                    role: 'assistant',
+                                    content: result.reply || '도와드릴게요, 주인님.',
+                                    timestamp: new Date().toISOString(),
+                                    agentId: currentAgent.id,
+                                };
+                            }
+                        } else {
+                            assistantMessage = {
+                                id: crypto.randomUUID(),
+                                role: 'assistant',
+                                content: result.reply || `${currentAgent.name}입니다. 이어서 도와드릴게요, 주인님.`,
+                                timestamp: new Date().toISOString(),
+                                agentId: currentAgent.id,
+                            };
+                        }
+
                         setMessages((prev) => [...prev, assistantMessage]);
-                    } else {
-                        await executeAction(fallbackAction);
-                        const response = getResponseForAction(fallbackAction, messageText);
-                        const assistantMessage: ChatMessage = {
-                            id: crypto.randomUUID(),
-                            role: 'assistant',
-                            content: response.content,
-                            timestamp: new Date().toISOString(),
-                            action: { ...fallbackAction, executed: true },
-                            quickReplies: response.quickReplies,
-                        };
-                        setMessages((prev) => [...prev, assistantMessage]);
+                        rollingHistory = [
+                            ...rollingHistory,
+                            { role: 'assistant', content: assistantMessage.content },
+                        ];
+
+                        if (index < activeAgents.length - 1) {
+                            await new Promise((resolve) => setTimeout(resolve, 180));
+                        }
                     }
                 } else {
-                    const assistantMessage: ChatMessage = {
-                        id: crypto.randomUUID(),
-                        role: 'assistant',
-                        content: result.reply,
-                        timestamp: new Date().toISOString(),
-                    };
-                    setMessages((prev) => [...prev, assistantMessage]);
+                    const singleAgent = activeAgents[0] || primaryAgent;
+                    const singlePersonaMemory = singleAgent
+                        ? (personaMemoryContextByAgent?.[singleAgent.id] || personaMemoryContext || '')
+                        : (personaMemoryContext || '');
+
+                    const result = await generateChatResponse(
+                        activeGeminiConfig.apiKey,
+                        history,
+                        events,
+                        todos,
+                        entries,
+                        userName,
+                        activeGeminiConfig.modelName,
+                        singleAgent,
+                        chatMode,
+                        singlePersonaMemory
+                    );
+
+                    const fallbackAction = mapGeminiActionToChatAction(result.action);
+                    if (!fallbackAction && result.action?.type === 'delete_event') {
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: '삭제할 일정을 찾지 못했어요. 일정 제목이나 날짜를 조금 더 구체적으로 말해 주세요.',
+                            timestamp: new Date().toISOString(),
+                            agentId: singleAgent?.id,
+                            quickReplies: ['오늘 일정 보여줘', '내일 일정 보여줘'],
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                        setIsProcessing(false);
+                        return;
+                    }
+                    if (fallbackAction) {
+                        if (requiresConfirmation(fallbackAction)) {
+                            setPendingAction(fallbackAction);
+                            const prompt = buildConfirmationPrompt(fallbackAction);
+                            const assistantMessage: ChatMessage = {
+                                id: crypto.randomUUID(),
+                                role: 'assistant',
+                                content: prompt.content,
+                                timestamp: new Date().toISOString(),
+                                agentId: singleAgent?.id,
+                                action: fallbackAction,
+                                quickReplies: prompt.quickReplies,
+                            };
+                            setMessages((prev) => [...prev, assistantMessage]);
+                        } else {
+                            await executeAction(fallbackAction);
+                            const response = getResponseForAction(fallbackAction, messageText);
+                            const assistantMessage: ChatMessage = {
+                                id: crypto.randomUUID(),
+                                role: 'assistant',
+                                content: response.content,
+                                timestamp: new Date().toISOString(),
+                                agentId: singleAgent?.id,
+                                action: { ...fallbackAction, executed: true },
+                                quickReplies: response.quickReplies,
+                            };
+                            setMessages((prev) => [...prev, assistantMessage]);
+                        }
+                    } else {
+                        const assistantMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: result.reply,
+                            timestamp: new Date().toISOString(),
+                            agentId: singleAgent?.id,
+                        };
+                        setMessages((prev) => [...prev, assistantMessage]);
+                    }
                 }
             } catch (error) {
                 console.error(error);
@@ -731,6 +952,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                     role: 'assistant',
                     content: "죄송해요, 대화 중 오류가 발생했어요. 다시 말씀해 주시겠어요?",
                     timestamp: new Date().toISOString(),
+                    agentId: primaryAgent?.id,
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
             }
@@ -741,6 +963,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 role: 'assistant',
                 content: response.content,
                 timestamp: new Date().toISOString(),
+                agentId: primaryAgent?.id,
                 quickReplies: response.quickReplies,
             };
             setMessages((prev) => [...prev, assistantMessage]);
@@ -756,12 +979,14 @@ const ChatView: React.FC<ChatViewProps> = ({
     return (
         <div className="w-full max-w-[800px] mx-auto text-[#37352f] h-full flex flex-col font-sans overflow-x-hidden" style={{ touchAction: 'pan-y' }}>
             <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-2 py-6 space-y-6 scrollbar-hide" style={{ touchAction: 'pan-y' }}>
-                {messages.map((msg, index) => (
+                {messages.map((msg, index) => {
+                    const messageAgent = getAgentForMessage(msg);
+                    return (
                     <div key={msg.id} className={`flex w-full mb-6 min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start items-start gap-3'}`}>
                         {msg.role === 'assistant' && (
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#37352f] flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
-                                {agent?.avatar ? (
-                                    <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                                {messageAgent?.avatar ? (
+                                    <img src={messageAgent.avatar} alt={messageAgent.name} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full bg-[#37352f]" />
                                 )}
@@ -770,20 +995,18 @@ const ChatView: React.FC<ChatViewProps> = ({
 
                         <div className={`flex flex-col min-w-0 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                             {msg.role === 'assistant' && (
-                                <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{agent?.name || 'LifeSync AI'}</span>
+                                <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{messageAgent?.name || 'LifeSync AI'}</span>
                             )}
 
                             <div
                                 className={`
-                                    p-3.5 rounded-2xl whitespace-pre-line leading-relaxed shadow-sm text-[14px] sm:text-[15px] break-words [overflow-wrap:anywhere]
+                                    p-3.5 rounded-2xl leading-relaxed shadow-sm text-[14px] sm:text-[15px] break-words [overflow-wrap:anywhere]
                                     ${msg.role === 'user'
                                         ? 'bg-[#37352f] text-white rounded-br-sm'
                                         : 'bg-white border border-[#e9e9e8] text-[#37352f] rounded-bl-sm'}
                                 `}
                             >
-                                {msg.content.split('**').map((part, i) =>
-                                    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
-                                )}
+                                {renderRichMessage(msg.content)}
                             </div>
 
                             {/* Quick Replies - Only for the first message */}
@@ -802,19 +1025,23 @@ const ChatView: React.FC<ChatViewProps> = ({
                             )}
                         </div>
                     </div>
-                ))}
+                )})}
 
                 {isProcessing && (
                     <div className="flex w-full mb-6 justify-start items-start gap-3 min-w-0">
                         <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[#37352f] flex items-center justify-center text-white shadow-sm flex-shrink-0 overflow-hidden mt-1">
-                            {agent?.avatar ? (
-                                <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
+                            {primaryAgent?.avatar ? (
+                                <img src={primaryAgent.avatar} alt={primaryAgent.name} className="w-full h-full object-cover" />
                             ) : (
                                 <div className="w-full h-full bg-[#37352f]" />
                             )}
                         </div>
                         <div className="flex flex-col items-start">
-                            <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">{agent?.name || 'LifeSync AI'}</span>
+                            <span className="text-xs text-[#9b9a97] mb-1.5 ml-1">
+                                {activeAgents.length > 1
+                                    ? `${activeAgents.length}명 페르소나 응답 생성 중`
+                                    : (primaryAgent?.name || 'LifeSync AI')}
+                            </span>
                             <div className="bg-white text-[#9b9a97] p-4 rounded-2xl rounded-bl-sm border border-[#e9e9e8] flex items-center gap-2 shadow-sm">
                                 <div className="flex gap-1">
                                     <span className="w-1.5 h-1.5 bg-[#d3d1cb] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
@@ -833,16 +1060,48 @@ const ChatView: React.FC<ChatViewProps> = ({
                 <div className="space-y-3">
                     {showToolbar && (
                         <div className="p-3 rounded-xl border border-[#e9e9e8] bg-[#fbfbfa] space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-[#787774]">페르소나 선택 모드</span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsMultiSelectEnabled(prev => {
+                                            const next = !prev;
+                                            if (!next && activeAgents.length > 1 && primaryAgent?.id) {
+                                                onSelectAgents?.([primaryAgent.id]);
+                                            }
+                                            return next;
+                                        });
+                                    }}
+                                    className={`px-2.5 py-1 text-[11px] rounded-md border transition-colors ${isMultiSelectEnabled
+                                        ? 'border-[#37352f] bg-[#37352f] text-white'
+                                        : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#f7f7f5]'}`}
+                                >
+                                    {isMultiSelectEnabled ? '다중' : '단일(1:1)'}
+                                </button>
+                            </div>
                             <div className="flex flex-wrap gap-2">
                                 {availableAgents.map((availableAgent) => (
                                     <button
                                         key={availableAgent.id}
                                         type="button"
                                         onClick={() => {
-                                            onSelectAgent?.(availableAgent.id);
-                                            setShowToolbar(false);
+                                            if (!isMultiSelectEnabled) {
+                                                onSelectAgents?.([availableAgent.id]);
+                                                setShowToolbar(false);
+                                                return;
+                                            }
+
+                                            const currentIds = activeAgents.map((activeAgent) => activeAgent.id);
+                                            const isSelected = currentIds.includes(availableAgent.id);
+                                            let nextIds = isSelected
+                                                ? currentIds.filter((id) => id !== availableAgent.id)
+                                                : [...currentIds, availableAgent.id];
+                                            if (nextIds.length === 0) nextIds = [availableAgent.id];
+                                            if (!isSelected && nextIds.length > MAX_GROUP_AGENTS) return;
+                                            onSelectAgents?.(nextIds);
                                         }}
-                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors flex items-center gap-2 ${agent?.id === availableAgent.id
+                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors flex items-center gap-2 ${activeAgents.some((activeAgent) => activeAgent.id === availableAgent.id)
                                             ? 'border-[#37352f] bg-[#37352f] text-white'
                                             : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#f7f7f5] hover:text-[#37352f]'}`}
                                     >
@@ -850,13 +1109,18 @@ const ChatView: React.FC<ChatViewProps> = ({
                                             {availableAgent.avatar ? (
                                                 <img src={availableAgent.avatar} alt="" className="w-full h-full object-cover" />
                                             ) : (
-                                                <div className={`w-full h-full ${agent?.id === availableAgent.id ? 'bg-white/20' : 'bg-[#37352f]'}`} />
+                                                <div className={`w-full h-full ${activeAgents.some((activeAgent) => activeAgent.id === availableAgent.id) ? 'bg-white/20' : 'bg-[#37352f]'}`} />
                                             )}
                                         </div>
                                         <span>{availableAgent.name}</span>
                                     </button>
                                 ))}
                             </div>
+                            <p className="text-[11px] text-[#9b9a97] leading-relaxed">
+                                {isMultiSelectEnabled
+                                    ? `다중 모드에서는 페르소나를 최대 ${MAX_GROUP_AGENTS}명까지 선택할 수 있어요.`
+                                    : '단일 모드에서는 한 명만 선택되어 1:1로 대화해요.'}
+                            </p>
                             <div className="flex flex-wrap gap-2">
                                 {(['basic', 'roleplay', 'learning'] as ChatMode[]).map((mode) => (
                                     <button
@@ -879,7 +1143,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                             onClick={() => setShowToolbar(prev => !prev)}
                             className="shrink-0 w-12 h-12 rounded-xl border border-[#e9e9e8] bg-white flex items-center justify-center text-[#787774] hover:text-[#37352f] hover:bg-[#f7f7f5] transition-colors"
                             aria-label="대화 도구 열기"
-                            title={`${agent?.name || 'LifeSync AI'} · ${chatModeLabels[chatMode]}`}
+                            title={`${activeAgents.map((activeAgent) => activeAgent.name).join(', ') || 'LifeSync AI'} · ${chatModeLabels[chatMode]}`}
                         >
                             <Plus size={16} />
                         </button>

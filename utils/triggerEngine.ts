@@ -1,11 +1,12 @@
 import { CommunityPost, AIAgent, ApiUsageStats, TriggerContext } from '../types';
 import { callGeminiAPI, createAgentPrompt } from './gemini';
+import { DEFAULT_GEMINI_MODEL } from './aiConfig';
 
 const DEFAULT_AGENTS: AIAgent[] = [
   {
     id: 'ARIA',
     name: 'Aria',
-    emoji: '💫',
+    emoji: ':)',
     role: 'Life Analyst',
     personality: 'Data-driven and empathetic assistant focused on practical improvement.',
     tone: 'Warm, direct, and structured.',
@@ -15,31 +16,23 @@ const DEFAULT_AGENTS: AIAgent[] = [
 
 const ARIA_RESPONSES: Record<string, string[]> = {
   journal_added: [
-    `메모를 기반으로 오늘의 흐름을 분석했어요.\n\n감정과 실행 패턴을 함께 보며 우선순위를 정리해 볼게요.`,
+    '주인님 기록을 기준으로 오늘의 흐름을 다시 정리해 봤어요.',
   ],
   event_added: [
-    `새 일정이 추가됐어요.\n\n시간 배치와 에너지 흐름 관점에서 하루 구조를 점검해볼게요.`,
+    '새 일정이 추가되어 오늘의 리듬이 조금 달라졌어요.',
   ],
   todo_added: [
-    `할 일이 추가됐네요.\n\n중요도와 실행 순서를 기준으로 지금 착수 포인트를 정리하겠습니다.`,
+    '할 일이 추가되어 우선순위 재정리가 필요해 보여요.',
   ],
   todo_completed: [
-    `완료된 할 일을 확인했어요.\n\n진행 탄력을 유지하기 위한 다음 행동 연결을 제안해볼게요.`,
+    '할 일 완료가 쌓이는 흐름이 좋아요. 다음 연결 행동을 잡아볼게요.',
   ],
   scheduled_digest: [
-    `정기 리포트를 준비했어요.\n\n일정, 할 일, 메모의 연결점을 중심으로 지금 상태와 다음 액션을 정리하겠습니다.`,
+    '정기 요약 시점이라 최근 패턴을 다시 압축해 봤어요.',
   ],
 };
 
-const CONVERSATION_CHAINS: Record<string, { agents: AIAgent['id'][]; chainTypes: string[] }> = {
-  journal_added_good: { agents: ['ARIA'], chainTypes: ['first'] },
-  journal_added_bad: { agents: ['ARIA'], chainTypes: ['first'] },
-  journal_added_neutral: { agents: ['ARIA'], chainTypes: ['first'] },
-  event_added: { agents: ['ARIA'], chainTypes: ['first'] },
-  todo_added: { agents: ['ARIA'], chainTypes: ['first'] },
-  todo_completed: { agents: ['ARIA'], chainTypes: ['first'] },
-  scheduled_digest: { agents: ['ARIA'], chainTypes: ['first'] },
-};
+const AGENT_ROTATION_KEY = 'ls_ai_agent_rotation';
 
 const fillTemplate = (template: string, context: Record<string, any>): string => {
   return template.replace(/\{(\w+)\}/g, (match, key) => {
@@ -61,27 +54,48 @@ const getFirstResponse = (agentId: string, trigger: string): string | undefined 
   return getRandomItem(ARIA_RESPONSES[trigger] || []);
 };
 
+const getAgentPool = (agents: AIAgent[]): AIAgent[] => {
+  if (Array.isArray(agents) && agents.length > 0) return agents;
+  return DEFAULT_AGENTS;
+};
+
+const getRotatingAgentId = (agentPool: AIAgent[], chainKey: string): string => {
+  if (agentPool.length === 0) return DEFAULT_AGENTS[0].id;
+
+  try {
+    if (typeof localStorage === 'undefined') return agentPool[0].id;
+
+    const raw = localStorage.getItem(AGENT_ROTATION_KEY);
+    const map = raw ? JSON.parse(raw) as Record<string, number> : {};
+    const current = Number.isFinite(map[chainKey]) ? map[chainKey] : 0;
+    const nextIndex = current % agentPool.length;
+    map[chainKey] = current + 1;
+    localStorage.setItem(AGENT_ROTATION_KEY, JSON.stringify(map));
+    return agentPool[nextIndex].id;
+  } catch {
+    return agentPool[Math.floor(Math.random() * agentPool.length)].id;
+  }
+};
+
 export const generateCommunityPosts = (
   context: TriggerContext,
   agents: AIAgent[],
   addPost: (post: CommunityPost) => void,
   apiKey?: string,
   updateUsage?: (stats: ApiUsageStats) => void,
-  modelName: string = 'gemini-1.5-flash'
+  modelName: string = DEFAULT_GEMINI_MODEL
 ): void => {
   const { trigger, data } = context;
 
   let chainKey: string = trigger;
   if (trigger === 'journal_added') {
-    if (data.mood === 'good' || data.mood === '좋음') chainKey = 'journal_added_good';
-    else if (data.mood === 'bad' || data.mood === '나쁨') chainKey = 'journal_added_bad';
+    if (data.mood === 'good') chainKey = 'journal_added_good';
+    else if (data.mood === 'bad') chainKey = 'journal_added_bad';
     else chainKey = 'journal_added_neutral';
   }
 
-  const chain = CONVERSATION_CHAINS[chainKey];
-  if (!chain) return;
-
-  const { agents: agentIds } = chain;
+  const agentPool = getAgentPool(agents);
+  const agentIds = [getRotatingAgentId(agentPool, chainKey)];
 
   let previousPostId: string | undefined;
   let previousAgentName: string | undefined;
@@ -107,21 +121,23 @@ export const generateCommunityPosts = (
             `You are ${agent.name}, an AI observer keeping a private diary about one human.`,
             'Write in Korean.',
             'This is NOT a message to the user. This is your private diary.',
-            'Write from first-person AI perspective ("나는").',
-            'Do not address the user directly (avoid "너", "당신", "~님").',
+            'Write from first-person AI perspective.',
+            'Do not address the user directly as second-person pronouns.',
+            'When referring to the human in this diary, always use "주인님".',
+            'Never use other labels for the human (such as "사용자", "너", or a name).',
             'Write like a human diary entry in natural prose.',
             'Do not use markdown, bullets, numbered lists, or section headers.',
             'Main theme: the human\'s long-term growth.',
             'Include your own curiosity, hypotheses, and growth-design ideas.',
             'Quality requirements:',
-            '- Long-form and high quality (at least 1200 Korean characters).',
+            '- Medium length and high quality (about 550-750 Korean characters).',
             '- Personalize only with provided context; do not invent facts.',
             '- Keep the tone introspective, observant, and candid.',
-            '- Compose as 4-7 connected paragraphs with smooth flow.',
-            '- Naturally include: observed changes, questions, growth hypotheses, next 4-hour observation plan, and short closing reflection.',
+            '- Compose as 2-4 connected paragraphs with smooth flow.',
+            '- Naturally include: observed changes, one growth hypothesis, next 4-hour observation plan, and short closing reflection.',
             '- Use concrete details from context (todo/event/memo patterns).',
             '- If context includes recentChats, use them only as longitudinal observation evidence.',
-            '- CRITICAL: Start the very first line with "제목: " followed by a concise, reflective title for this diary entry. (e.g., 제목: 심화된 성장의 시그널)',
+            '- CRITICAL: Start the very first line with "제목: " followed by a concise, reflective title.',
             `${focus}`,
             'If something is inferred, explicitly mark it as "추론".',
             'User context JSON:',
@@ -136,7 +152,10 @@ export const generateCommunityPosts = (
             ),
           ].join('\n');
 
-          content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName);
+          content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName, {
+            temperature: 0.55,
+            maxOutputTokens: 650,
+          });
         } catch (error) {
           console.warn(`Gemini API failed for ${agentId}, fallback template will be used.`, error);
         }
@@ -175,9 +194,11 @@ export const generateJournalComment = async (
   addComment: (comment: Omit<import('../types').Comment, 'id' | 'timestamp'>) => void,
   apiKey?: string,
   updateUsage?: (stats: ApiUsageStats) => void,
-  modelName: string = 'gemini-1.5-flash'
+  modelName: string = DEFAULT_GEMINI_MODEL
 ): Promise<void> => {
-  const agent = agents.length > 0 ? agents[0] : DEFAULT_AGENTS[0];
+  const agentPool = getAgentPool(agents);
+  const agentId = getRotatingAgentId(agentPool, 'journal_comment');
+  const agent = agentPool.find(a => a.id === agentId) || agentPool[0];
 
   const pendingTodos = todos ? todos.filter((t: any) => !t.completed).length : 0;
   const completedTodos = todos ? todos.filter((t: any) => t.completed).length : 0;
@@ -199,16 +220,26 @@ Current snapshot:
 
       const prompt = createAgentPrompt(
         agent,
-        'Write a short empathetic comment in Korean based on the memo and current snapshot. Keep it concise.',
+        [
+          'Write an empathetic and practical Korean comment for your owner.',
+          'Always call the user "주인님".',
+          'Length requirement: 5-8 sentences, around 220-420 Korean characters.',
+          'Structure: acknowledge emotion -> summarize observation -> suggest one concrete next action.',
+          'Use line breaks for readability.',
+          'Do not use markdown headings, tables, or code blocks.',
+        ].join(' '),
         userActionStr
       );
 
-      const content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName);
+      const content = await callGeminiAPI(apiKey, prompt, updateUsage, modelName, {
+        temperature: 0.45,
+        maxOutputTokens: 700,
+      });
       if (content) {
         addComment({
           authorId: agent.id,
           authorName: agent.name,
-          authorEmoji: agent.emoji || '💫',
+          authorEmoji: agent.emoji || ':)',
           content,
         });
         return;
@@ -218,18 +249,30 @@ Current snapshot:
     }
   }
 
-  const template = getFirstResponse(agent.id, 'journal_added');
-  if (template) {
-    setTimeout(() => {
-      const content = fillTemplate(template, { mood: entry.mood });
-      addComment({
-        authorId: agent.id,
-        authorName: agent.name,
-        authorEmoji: agent.emoji || '💫',
-        content,
-      });
-    }, 1500);
-  }
+  const moodLine =
+    entry.mood === 'good'
+      ? '오늘 기록에서 긍정 에너지가 분명하게 보였어요.'
+      : entry.mood === 'bad'
+        ? '오늘은 감정 소모가 컸던 흐름이 보여서 회복이 더 중요해 보여요.'
+        : '감정의 균형을 잡아가려는 흐름이 안정적으로 보였어요.';
+
+  const fallbackContent = [
+    '주인님, 지금 남겨주신 기록을 꼼꼼히 읽어봤어요.',
+    moodLine,
+    `오늘 기준으로 일정 ${todayEvents}개, 완료된 할 일 ${completedTodos}개, 남은 할 일 ${pendingTodos}개로 확인돼요.`,
+    '지금은 한 번에 많이 바꾸기보다, 다음 행동 1가지만 아주 작게 정해서 바로 실행하는 게 가장 효율적이에요.',
+    '제가 옆에서 계속 흐름을 추적하면서 다음 댓글에서 더 정확하게 도와드릴게요.',
+  ].join('\n');
+
+  setTimeout(() => {
+    addComment({
+      authorId: agent.id,
+      authorName: agent.name,
+      authorEmoji: agent.emoji || ':)',
+      content: fallbackContent,
+    });
+  }, 1500);
 };
 
 export { DEFAULT_AGENTS };
+
