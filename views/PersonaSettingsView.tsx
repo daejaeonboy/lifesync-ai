@@ -25,6 +25,9 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AIAgent | null>(null);
+  const supportedChatConnections = (settings.apiConnections || []).filter(
+    (connection) => connection.provider === 'gemini' || connection.provider === 'xai'
+  );
 
   const editingTarget = useMemo(
     () => agents.find((agent) => agent.id === editingId) || null,
@@ -43,6 +46,10 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
 
   const saveAgent = () => {
     if (!editingId || !draft) return;
+    if (!draft.connectionId) {
+      alert('전역 기본 연결은 비활성화되었습니다. 이 페르소나에 Gemini/xAI 연결을 지정해 주세요.');
+      return;
+    }
     onUpdateAgents(
       agents.map((agent) => (agent.id === editingId ? { ...agent, ...draft } : agent))
     );
@@ -153,6 +160,14 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
               </div>
             </div>
             <p className="text-xs text-[#787774] mt-3 line-clamp-2">{agent.personality}</p>
+            {agent.connectionId && (() => {
+              const conn = settings.apiConnections?.find(c => c.id === agent.connectionId);
+              return conn ? (
+                <div className="mt-2 text-[10px] text-[#9b9a97] bg-[#f7f7f5] px-2 py-1 rounded-md inline-block">
+                  🔗 {conn.provider.toUpperCase()} · {conn.modelName}
+                </div>
+              ) : null;
+            })()}
           </div>
         ))}
       </div>
@@ -292,6 +307,23 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
                     </label>
                   </div>
                 </div>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#787774] ml-1 uppercase">API 연결</span>
+                  <select
+                    value={draft.connectionId || ''}
+                    onChange={(e) => setDraft({ ...draft, connectionId: e.target.value || undefined })}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-[#dcdcd9] text-sm focus:border-[#37352f] focus:ring-1 focus:ring-[#37352f] transition-all outline-none bg-white"
+                  >
+                    <option value="" disabled>연결을 선택하세요</option>
+                    {supportedChatConnections.map(conn => (
+                      <option key={conn.id} value={conn.id}>
+                        {conn.provider.toUpperCase()} · {conn.modelName}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-[#9b9a97] ml-1">전역 기본 연결은 사용하지 않으며, 각 페르소나마다 Gemini/xAI 연결이 필수입니다</span>
+                </label>
               </div>
             </div>
 

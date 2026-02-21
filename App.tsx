@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'; // Refreshed for Calendar fix
 import { ViewState, CalendarEvent, Todo, JournalEntry, AiPost, CommunityPost, AIAgent, ActivityItem, AppSettings, TodoList, CalendarTag, JournalCategory, Comment, User, ApiUsageStats, TriggerContext, ChatSession, ChatMessage } from './types';
-import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Loader2, Users, Menu } from 'lucide-react';
+import { Calendar as CalendarIcon, CheckSquare, BookOpen, MessageCircle, Sparkles, ChevronDown, Plus, Trash2, Settings2, Hash, Search, Layout, MoreVertical, Edit3, LogOut, User as UserIcon, X, Users, Menu } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
 import { supabase } from './utils/supabase';
@@ -12,50 +12,21 @@ import { DEFAULT_AGENTS } from './data/defaultAgents';
 import SettingsView from './views/SettingsView';
 import ChatView from './views/ChatView';
 import AuthView from './views/AuthView';
-import { DEFAULT_GEMINI_MODEL, getActiveGeminiConfig } from './utils/aiConfig';
+import { DEFAULT_GEMINI_MODEL, getActiveGeminiConfig, getActiveAIConfig } from './utils/aiConfig';
 import { normalizeKoreanText } from './utils/encodingFix';
-
-// Mock Data Loaders (In a real app, this would be an API or more robust local storage)
-const loadFromStorage = <T,>(key: string, defaultVal: T): T => {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : defaultVal;
-  } catch (e) {
-    console.error(`Error loading ${key} from storage`, e);
-    return defaultVal;
-  }
-};
-
-const saveToStorage = (key: string, data: any) => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
+import { syncEvents, syncTodos, syncTodoLists, syncEntries, syncJournalCategories, syncCommunityPosts, syncAgents, syncUserData, setOnSyncError } from './services/syncService';
+import { debugManualSync } from './utils/debugSync';
+import { useAuthSession } from './hooks/useAuthSession';
 
 type ChatObservation = {
   text: string;
   timestamp: string;
 };
 
-const CHAT_OBSERVATIONS_KEY = 'ls_recent_chat_observations';
 const PERSONA_MEMORY_SESSION_LIMIT = 4;
 const PERSONA_MEMORY_LINE_LIMIT = 12;
 const PERSONA_MEMORY_ITEM_CHAR_LIMIT = 120;
 const PERSONA_MEMORY_TOTAL_CHAR_LIMIT = 1400;
-
-const appendChatObservation = (text: string) => {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-
-  const observations = loadFromStorage<ChatObservation[]>(CHAT_OBSERVATIONS_KEY, []);
-  const next = [
-    ...observations,
-    {
-      text: trimmed.slice(0, 280),
-      timestamp: new Date().toISOString(),
-    },
-  ].slice(-30);
-
-  saveToStorage(CHAT_OBSERVATIONS_KEY, next);
-};
 
 const dedupeAgentIds = (ids: Array<string | undefined | null>): string[] =>
   Array.from(
@@ -234,6 +205,7 @@ const normalizeAIAgent = (agent: any, fallbackOrder: number = 0): AIAgent => ({
   tone: normalizeKoreanText(String(agent?.tone || 'Warm and clear.')),
   color: String(agent?.color || '#37352f'),
   avatar: typeof agent?.avatar === 'string' ? agent.avatar : undefined,
+  connectionId: typeof agent?.connection_id === 'string' ? agent.connection_id : (typeof agent?.connectionId === 'string' ? agent.connectionId : undefined),
 });
 
 const DEFAULT_TAGS: CalendarTag[] = [
@@ -246,8 +218,13 @@ const DEFAULT_TODO_LISTS: TodoList[] = [
   { id: 'default', title: '할 일', order: 1 },
 ];
 
-const mapCategoryToListId = (category?: Todo['category']): string => {
-  return 'default';
+const VALID_VIEWS: ViewState[] = ['dashboard', 'calendar', 'todo', 'journal', 'board', 'chat', 'settings', 'api-settings', 'personas'];
+
+const resolveViewFromUrl = (): ViewState => {
+  if (typeof window === 'undefined') return 'chat';
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get('view');
+  return view && VALID_VIEWS.includes(view as ViewState) ? (view as ViewState) : 'chat';
 };
 
 // Settings icon component
@@ -257,133 +234,55 @@ const SettingsIcon = ({ size = 18 }: { size?: number }) => (
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
   </svg>
 );
-
 const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => loadFromStorage('lifesync_user', null));
-  const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [currentView, setCurrentView] = useState<ViewState>(() => loadFromStorage('ls_current_view', 'chat'));
+  const bootId = useRef(Math.random().toString(36).slice(2, 6)).current;
+  const skipSyncRef = useRef(true); // v2.5: Block sync hooks until specifically enabled
+  const [isDataLoaded, setIsDataLoaded] = useState(true); // v2.6: Start as true to show cache immediately
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
+  const [currentView, setCurrentView] = useState<ViewState>(() => resolveViewFromUrl());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  useEffect(() => {
+    console.log(`[App] v2.5 booting id=${bootId}...`);
+  }, []);
+
+  // v2.5: Initialize from LocalStorage for instant refresh UX
+  // Using <T,> syntax to avoid JSX ambiguity in .tsx files
+  const getInitialState = <T,>(key: string, fallback: T): T => {
+    try {
+      const saved = localStorage.getItem(`lifesync_cache_${key}`);
+      return saved ? JSON.parse(saved) : fallback;
+    } catch { return fallback; }
+  };
+
   // App Data State
-  const [events, setEvents] = useState<CalendarEvent[]>(() => {
-    const stored = loadFromStorage('ls_events', []);
-    return Array.isArray(stored) ? stored : [];
-  });
-  const [todoLists, setTodoLists] = useState<TodoList[]>(() => {
-    const stored = loadFromStorage<TodoList[]>('ls_todo_lists', []).map(list => ({
-      ...list,
-      title: normalizeKoreanText(list.title),
-    }));
-    // Migration: Force reset to default single list if we detect multiple lists (old default was 5, user might have added more)
-    // heuristic: if length > 1, it's likely old data or user custom data that needs migration to "default state" as requested.
-    // To play it safe for "all users", we usually wouldn't wipe, but the USER requested "make the modified content the default state" implying a reset.
-    // Let's being slightly safer: if it looks like the OLD default structure (has 'must_do' or length >= 4), reset it.
-    if (stored && (stored.some(l => l.id === 'must_do') || stored.length >= 4)) {
-      return DEFAULT_TODO_LISTS;
-    }
-    if (stored && Array.isArray(stored) && stored.length > 0) return stored;
-    return DEFAULT_TODO_LISTS;
-  });
-  const [todos, setTodos] = useState<Todo[]>(() => {
-    const stored = loadFromStorage('ls_todos', []);
-    return (stored as Todo[]).map(t => ({
-      ...t,
-      category: t.category ?? 'personal',
-      listId: t.listId ?? mapCategoryToListId(t.category),
-    }));
-  });
-  const [entries, setEntries] = useState<JournalEntry[]>(() => loadFromStorage('ls_entries', []));
-  const [posts, setPosts] = useState<AiPost[]>(() => loadFromStorage('ls_posts', []));
+  const [events, setEvents] = useState<CalendarEvent[]>(() => getInitialState('events', []));
+  const [todoLists, setTodoLists] = useState<TodoList[]>(() => getInitialState('todoLists', []));
+  const [todos, setTodos] = useState<Todo[]>(() => getInitialState('todos', []));
+  const [entries, setEntries] = useState<JournalEntry[]>(() => getInitialState('entries', []));
+  const [posts, setPosts] = useState<AiPost[]>(() => getInitialState('posts', []));
 
   // Community Board State
-  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => loadFromStorage('ls_community', []));
-  const [aiAgents, setAiAgents] = useState<AIAgent[]>(() => {
-    const stored = loadFromStorage<AIAgent[]>('ls_agents', DEFAULT_AGENTS);
-    return stored.map(agent => ({
-      ...agent,
-      name: normalizeKoreanText(agent.name),
-      role: normalizeKoreanText(agent.role),
-      personality: normalizeKoreanText(agent.personality),
-    }));
-  });
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => getInitialState('communityPosts', []));
+  const [aiAgents, setAiAgents] = useState<AIAgent[]>(() => getInitialState('aiAgents', []));
 
   // Activity Log & Settings
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => {
-    const stored = loadFromStorage('ls_chat_sessions', []);
-    return Array.isArray(stored) ? stored.filter((s: ChatSession) => hasUserChatMessage(s)) : [];
-  });
-  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => loadFromStorage('ls_active_chat_id', null));
-  const [activeChatAgentIds, setActiveChatAgentIds] = useState<string[]>(() => {
-    const stored = loadFromStorage<string[]>('ls_active_chat_agents', []);
-    if (Array.isArray(stored) && stored.length > 0) return dedupeAgentIds(stored);
-    const legacy = loadFromStorage<string>('ls_active_chat_agent', 'ARIA');
-    return dedupeAgentIds([legacy || 'ARIA']);
-  });
-  const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => loadFromStorage('ls_activity', []));
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    const storedSettings = loadFromStorage<any>('ls_settings', {
-      autoAiReactions: false,
-      chatActionConfirm: true,
-      apiConnections: [],
-      activeConnectionId: undefined
-    });
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => getInitialState('chatSessions', []));
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
+  const [activeChatAgentIds, setActiveChatAgentIds] = useState<string[]>([]);
+  const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => getInitialState('activityLog', []));
+  const [settings, setSettings] = useState<AppSettings>(() => getInitialState('settings', {
+    autoAiReactions: false,
+    chatActionConfirm: true,
+    apiConnections: [],
+    activeConnectionId: undefined
+  }));
 
-    if (!Array.isArray(storedSettings.apiConnections)) {
-      storedSettings.apiConnections = [];
-    }
-
-    // Backward compatibility migration: If geminiApiKey exists but no connections, create one
-    if (storedSettings.geminiApiKey && (!storedSettings.apiConnections || storedSettings.apiConnections.length === 0)) {
-      storedSettings.apiConnections = [{
-        id: 'legacy_gemini',
-        provider: 'gemini',
-        modelName: DEFAULT_GEMINI_MODEL,
-        apiKey: storedSettings.geminiApiKey,
-        isActive: true
-      }];
-      storedSettings.activeConnectionId = 'legacy_gemini';
-    }
-
-    if (!storedSettings.activeConnectionId) {
-      const firstActive = storedSettings.apiConnections.find((c: any) => c.isActive);
-      storedSettings.activeConnectionId = firstActive?.id;
-    }
-
-    return storedSettings;
-  });
-
-  const [calendarTags, setCalendarTags] = useState<CalendarTag[]>(() => {
-    const stored = loadFromStorage<CalendarTag[]>('ls_calendar_tags', []);
-    if (stored && Array.isArray(stored) && stored.length > 0) {
-      return stored.map(tag => ({ ...tag, name: normalizeKoreanText(tag.name) }));
-    }
-    return DEFAULT_TAGS;
-  });
-
-  const [journalCategories, setJournalCategories] = useState<JournalCategory[]>(() => {
-    const stored = loadFromStorage<JournalCategory[]>('ls_journal_categories', []);
-    if (stored && Array.isArray(stored) && stored.length > 0) {
-      // Migration: Rename AI to 메모장 if present
-      const migrated = stored.map(c => {
-        const normalizedName = normalizeKoreanText(c.name);
-        return normalizedName === 'AI' ? { ...c, name: '메모장' } : { ...c, name: normalizedName };
-      });
-      return migrated;
-    }
-    return [{ id: 'ai', name: '메모장' }];
-  });
+  const [calendarTags, setCalendarTags] = useState<CalendarTag[]>(() => getInitialState('calendarTags', []));
+  const [journalCategories, setJournalCategories] = useState<JournalCategory[]>(() => getInitialState('journalCategories', []));
 
   const [selectedJournalId, setSelectedJournalId] = useState<string | null>(null);
-  const [selectedJournalCategory, setSelectedJournalCategory] = useState<string>(() => {
-    const stored = loadFromStorage<JournalCategory[]>('ls_journal_categories', []);
-    if (stored && Array.isArray(stored) && stored.length > 0) {
-      const first = stored[0];
-      const normalizedName = normalizeKoreanText(first.name);
-      return normalizedName === 'AI' ? '메모장' : normalizedName;
-    }
-    return '메모장';
-  });
+  const [selectedJournalCategory, setSelectedJournalCategory] = useState<string>('메모장');
   const [journalSearchQuery, setJournalSearchQuery] = useState('');
   const [isAddingJournalCategory, setIsAddingJournalCategory] = useState(false);
   const [journalCategoryInput, setJournalCategoryInput] = useState('');
@@ -393,13 +292,14 @@ const App: React.FC = () => {
 
   // AI Diary Selection States
   const [selectedAiPostId, setSelectedAiPostId] = useState<string | null>(null);
-  const [selectedAiAgentId, setSelectedAiAgentId] = useState<string>(aiAgents[0]?.id || 'ARIA');
+  const [selectedAiAgentId, setSelectedAiAgentId] = useState<string>('ARIA');
   const [isAddingAiAgent, setIsAddingAiAgent] = useState(false);
   const [aiAgentInput, setAiAgentInput] = useState('');
   const [editingAiAgentId, setEditingAiAgentId] = useState<string | null>(null);
   const [editingAiAgentName, setEditingAiAgentName] = useState('');
   const [activeAiAgentMenu, setActiveAiAgentMenu] = useState<string | null>(null);
   const activeGeminiConfig = getActiveGeminiConfig(settings);
+  const activeAIConfig = getActiveAIConfig(settings);
   const primaryActiveChatAgentId = activeChatAgentIds[0] || aiAgents[0]?.id || 'ARIA';
 
 
@@ -407,21 +307,151 @@ const App: React.FC = () => {
   const undoRef = useRef<null | (() => void)>(null);
   const [undoToast, setUndoToast] = useState<{ id: string; label: string } | null>(null);
   const scheduledPostKeyRef = useRef<string | null>(null);
+  const recentChatObservationsRef = useRef<ChatObservation[]>([]);
   const pendingJournalAiCommentIdsRef = useRef<Set<string>>(new Set());
   const lastSyncedProfileAIFingerprintRef = useRef<string | null>(null);
 
-  // Persistence Effects
-  useEffect(() => saveToStorage('ls_events', events), [events]);
-  useEffect(() => saveToStorage('ls_todos', todos), [todos]);
-  useEffect(() => saveToStorage('ls_entries', entries), [entries]);
-  useEffect(() => saveToStorage('ls_posts', posts), [posts]);
-  useEffect(() => saveToStorage('ls_community', communityPosts), [communityPosts]);
-  useEffect(() => saveToStorage('ls_agents', aiAgents), [aiAgents]);
-  useEffect(() => saveToStorage('ls_todo_lists', todoLists), [todoLists]);
-  useEffect(() => saveToStorage('ls_activity', activityLog), [activityLog]);
-  useEffect(() => saveToStorage('ls_settings', settings), [settings]);
+  const appendChatObservation = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    recentChatObservationsRef.current = [
+      ...recentChatObservationsRef.current,
+      { text: trimmed.slice(0, 280), timestamp: new Date().toISOString() }
+    ].slice(-30);
+  };
+
+  const {
+    currentUser,
+    setCurrentUser,
+    isAuthInitializing,
+    authMode,
+    setAuthMode,
+    isLoggingOut,
+    logout,
+  } = useAuthSession({
+    onSession: async ({ event, user, profile }) => {
+      console.log(`[App] v2.5 onSession event: ${event} user: ${user.id} profile_present: ${!!profile}`);
+
+      // Note: Settings are now primarily synced via user_data.settings. 
+      // Profile lookups are only used for basic metadata (name, avatar, etc).
+
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        // v2.6: Do NOT set isDataLoaded(false). Keep UI interactive with cached data.
+        console.log(`[App] v2.6 background fetchUserData for user: ${user.id}`);
+        fetchUserData(user.id);
+      }
+    },
+    onSignedOut: () => {
+      console.log('[App] onSignedOut event');
+      setIsDataLoaded(false);
+    },
+    onBeforeSignOut: () => {
+      console.log('[App] onBeforeSignOut event');
+      setIsDataLoaded(false);
+      setIsMobileMenuOpen(false);
+      setActiveAiAgentMenu(null);
+    },
+  });
+
   useEffect(() => {
-    if (!currentUser) return;
+    setOnSyncError((err: any) => {
+      console.error('[App] Global Sync Error Caught:', err);
+      if (err.code === '42501' || err.status === 403 || err.message?.includes('RLS')) {
+        setSyncStatus('error');
+      }
+    });
+  }, []);
+
+  // Server sync effects
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_events', JSON.stringify(events));
+      if (skipSyncRef.current) return;
+      syncEvents(currentUser.id, events);
+    }
+  }, [events, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_todos', JSON.stringify(todos));
+      if (skipSyncRef.current) return;
+      syncTodos(currentUser.id, todos);
+    }
+  }, [todos, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_entries', JSON.stringify(entries));
+      if (skipSyncRef.current) return;
+      syncEntries(currentUser.id, entries);
+    }
+  }, [entries, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_communityPosts', JSON.stringify(communityPosts));
+      if (skipSyncRef.current) return;
+      syncCommunityPosts(currentUser.id, communityPosts);
+    }
+  }, [communityPosts, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_aiAgents', JSON.stringify(aiAgents));
+      if (skipSyncRef.current) return;
+      syncAgents(currentUser.id, aiAgents);
+    }
+  }, [aiAgents, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_todoLists', JSON.stringify(todoLists));
+      if (skipSyncRef.current) return;
+      syncTodoLists(currentUser.id, todoLists);
+    }
+  }, [todoLists, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_activityLog', JSON.stringify(activityLog));
+      if (skipSyncRef.current) return;
+      syncUserData(currentUser.id, { activityLog });
+    }
+  }, [activityLog, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_settings', JSON.stringify(settings));
+      if (skipSyncRef.current) return;
+      syncUserData(currentUser.id, { settings });
+    }
+  }, [settings, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_calendarTags', JSON.stringify(calendarTags));
+      if (skipSyncRef.current) return;
+      syncUserData(currentUser.id, { calendarTags });
+    }
+  }, [calendarTags, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_journalCategories', JSON.stringify(journalCategories));
+      if (skipSyncRef.current) return;
+      syncJournalCategories(currentUser.id, journalCategories);
+    }
+  }, [journalCategories, currentUser?.id, isDataLoaded]);
+
+  useEffect(() => {
+    if (currentUser && isDataLoaded) {
+      localStorage.setItem('lifesync_cache_chatSessions', JSON.stringify(chatSessions));
+      if (skipSyncRef.current) return;
+      syncUserData(currentUser.id, { chatSessions });
+    }
+  }, [chatSessions, currentUser?.id, isDataLoaded]);
+  useEffect(() => {
+    if (!currentUser || !isDataLoaded) return;
 
     const payload = {
       gemini_api_key: settings.geminiApiKey ?? '',
@@ -455,7 +485,22 @@ const App: React.FC = () => {
   useEffect(() => {
     lastSyncedProfileAIFingerprintRef.current = null;
   }, [currentUser?.id]);
-  useEffect(() => saveToStorage('ls_current_view', currentView), [currentView]);
+  useEffect(() => {
+    const onPopState = () => {
+      const next = resolveViewFromUrl();
+      setCurrentView(prev => (prev === next ? prev : next));
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+  useEffect(() => {
+    if (isAuthInitializing) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('view') === currentView) return;
+    url.searchParams.set('view', currentView);
+    window.history.replaceState({}, document.title, `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+  }, [currentView, isAuthInitializing]);
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [currentView]);
@@ -476,16 +521,6 @@ const App: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [isMobileMenuOpen]);
-  useEffect(() => saveToStorage('ls_calendar_tags', calendarTags), [calendarTags]);
-  useEffect(() => saveToStorage('ls_journal_categories', journalCategories), [journalCategories]);
-  useEffect(() => {
-    // Only save sessions that have at least one user message
-    const sessionsToSave = chatSessions.filter((s: ChatSession) => hasUserChatMessage(s));
-    saveToStorage('ls_chat_sessions', sessionsToSave);
-  }, [chatSessions]);
-  useEffect(() => saveToStorage('ls_active_chat_id', activeChatSessionId), [activeChatSessionId]);
-  useEffect(() => saveToStorage('ls_active_chat_agents', activeChatAgentIds), [activeChatAgentIds]);
-  useEffect(() => saveToStorage('ls_active_chat_agent', primaryActiveChatAgentId), [primaryActiveChatAgentId]);
   useEffect(() => {
     setChatSessions(prev => {
       let changed = false;
@@ -518,14 +553,6 @@ const App: React.FC = () => {
     if (resolvedAgentIds.length === 0) return;
     setActiveChatAgentIds(prev => (isSameAgentIdList(prev, resolvedAgentIds) ? prev : resolvedAgentIds));
   }, [activeChatSessionId, chatSessions, aiAgents]);
-  useEffect(() => {
-    if (currentUser) {
-      saveToStorage('lifesync_user', currentUser);
-    } else {
-      localStorage.removeItem('lifesync_user');
-    }
-  }, [currentUser]);
-
   const persistAiAgentsForUser = async (userId: string, sourceAgents: AIAgent[]) => {
     const normalizedAgents = (sourceAgents.length > 0 ? sourceAgents : DEFAULT_AGENTS).map((agent, index) => {
       const normalized = normalizeAIAgent(agent, index);
@@ -539,6 +566,7 @@ const App: React.FC = () => {
         tone: normalized.tone,
         color: normalized.color,
         avatar: normalized.avatar ?? null,
+        connection_id: normalized.connectionId ?? null,
         order: index,
       };
     });
@@ -560,278 +588,93 @@ const App: React.FC = () => {
     }
   };
 
-  // Supabase Auth Listener & Initial Sync
-  useEffect(() => {
-    const resolveProfile = async (user: any) => {
-      let { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (!profile) {
-        const { data: newProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert([{
-            id: user.id,
-            name: user.user_metadata?.full_name || user.email?.split('@')[0],
-            gemini_api_key: ''
-          }])
-          .select()
-          .single();
-
-        if (!insertError) profile = newProfile;
-      }
-
-      return profile;
-    };
-
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        setCurrentUser(null);
-        return;
-      }
-
-      const profile = await resolveProfile(session.user);
-      setCurrentUser({
-        id: session.user.id,
-        email: session.user.email || '',
-        name: profile?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-        avatar: session.user.user_metadata?.avatar_url || '',
-        geminiApiKey: profile?.gemini_api_key || ''
-      });
-      setSettings(prev => ({
-        ...prev,
-        autoAiReactions:
-          typeof profile?.auto_ai_reactions === 'boolean'
-            ? profile.auto_ai_reactions
-            : prev.autoAiReactions,
-        geminiApiKey:
-          typeof profile?.gemini_api_key === 'string'
-            ? profile.gemini_api_key
-            : prev.geminiApiKey,
-      }));
-
-      // Initial data fetch from Supabase
-      fetchUserData(session.user.id);
-    };
-
-    initAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && session?.user) {
-        const profile = await resolveProfile(session.user);
-        setCurrentUser({
-          id: session.user.id,
-          email: session.user.email || '',
-          name: profile?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar: session.user.user_metadata?.avatar_url || '',
-          geminiApiKey: profile?.gemini_api_key || ''
-        });
-        setSettings(prev => ({
-          ...prev,
-          autoAiReactions:
-            typeof profile?.auto_ai_reactions === 'boolean'
-              ? profile.auto_ai_reactions
-              : prev.autoAiReactions,
-          geminiApiKey:
-            typeof profile?.gemini_api_key === 'string'
-              ? profile.gemini_api_key
-              : prev.geminiApiKey,
-        }));
-
-        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-          fetchUserData(session.user.id);
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
+  const isFetchingRef = useRef(false);
   const fetchUserData = async (userId: string) => {
-    // Fetch all relevant data from Supabase in parallel
-    const [
-      { data: dbTodoLists },
-      { data: dbTodos },
-      { data: dbJournalCategories },
-      { data: dbJournalEntries },
-      { data: dbEvents },
-      { data: dbPosts },
-      { data: dbAiAgents }
-    ] = await Promise.all([
-      supabase.from('todo_lists').select('*').eq('user_id', userId).order('order'),
-      supabase.from('todos').select('*').eq('user_id', userId).order('order'),
-      supabase.from('journal_categories').select('*').eq('user_id', userId),
-      supabase.from('journal_entries').select('*').eq('user_id', userId).order('date', { ascending: false }),
-      supabase.from('calendar_events').select('*').eq('user_id', userId),
-      supabase.from('community_posts').select('*').eq('user_id', userId).order('timestamp', { ascending: false }),
-      supabase.from('ai_agents').select('*').eq('user_id', userId).order('order')
+    if (isFetchingRef.current) {
+      console.log('[App] fetchUserData already in progress, skipping duplicate call.');
+      return;
+    }
+    isFetchingRef.current = true;
+    // v2.6: Do NOT set isDataLoaded(false) here to maintain "Instant UI" feel.
+
+    // --- Stage 1: Critical UI Data (Settings, Todos, Events) ---
+    const fetchCritical = Promise.race([
+      Promise.all([
+        supabase.from('todo_lists').select('*').eq('user_id', userId).order('order'),
+        supabase.from('todos').select('*').eq('user_id', userId).order('order'),
+        supabase.from('calendar_events').select('*').eq('user_id', userId),
+        supabase.from('user_data').select('*').eq('user_id', userId).maybeSingle()
+      ]),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Critical fetch timeout')), 10000))
     ]);
 
-    // Migration Logic: If Supabase is empty but local state has data, migrate local data to Supabase
-    const isSupabaseEmpty = (!dbTodoLists || dbTodoLists.length === 0) && (!dbEvents || dbEvents.length === 0) && (!dbTodos || dbTodos.length === 0);
-
-    if (isSupabaseEmpty) {
-      console.log('Supabase is empty. Migrating local data...');
-
-      // Migrate Todo Lists
-      if (todoLists.length > 0) {
-        await supabase.from('todo_lists').insert(
-          todoLists.map(l => ({ id: l.id, user_id: userId, title: l.title, order: l.order }))
-        );
-      }
-
-      // Migrate Todos
-      if (todos.length > 0) {
-        await supabase.from('todos').insert(
-          todos.map(t => ({ id: t.id, user_id: userId, list_id: t.listId, text: t.text, completed: t.completed, order: 0 }))
-        );
-      }
-
-      // Migrate Events
-      if (events.length > 0) {
-        await supabase.from('calendar_events').insert(
-          events.map(e => ({
-            id: e.id,
-            user_id: userId,
-            title: e.title,
-            start_time: e.date + (e.startTime ? `T${e.startTime}:00` : 'T00:00:00'),
-            end_time: e.date + (e.endTime ? `T${e.endTime}:00` : 'T23:59:59'),
-            description: e.description,
-            tags: [e.type]
-          }))
-        );
-      }
-
-      // Migrate Entries
-      if (entries.length > 0) {
-        await supabase.from('journal_entries').insert(
-          entries.map(e => ({
-            id: e.id,
-            user_id: userId,
-            title: e.title,
-            content: e.content,
-            mood: e.mood,
-            date: e.date,
-            order: e.order
-          }))
-        );
-      }
-
-      if (aiAgents.length > 0) {
-        try {
-          await persistAiAgentsForUser(userId, aiAgents);
-        } catch (error) {
-          console.error('Failed to migrate local AI agents:', error);
-        }
-      }
-
-      // No need to fetch again, just keep current local state
+    let criticalResults;
+    try {
+      criticalResults = await fetchCritical;
+    } catch (err: any) {
+      console.warn('[App] fetchCritical failed or timed out:', err.message);
+      isFetchingRef.current = false;
+      setIsDataLoaded(true);
       return;
     }
 
-    if (dbTodoLists) {
-      setTodoLists(
-        dbTodoLists.map((list: any) => ({ ...list, title: normalizeKoreanText(list.title) }))
-      );
+    const [
+      { data: dbTodoLists },
+      { data: dbTodos },
+      { data: dbEvents },
+      { data: dbUserData }
+    ] = criticalResults;
+
+    // Apply Stage 1 data
+    if (dbTodoLists) setTodoLists(dbTodoLists.map((list: any) => ({ ...list, title: normalizeKoreanText(list.title) })));
+    if (dbTodos) setTodos(dbTodos.map((t: any) => ({ id: t.id, listId: t.list_id || undefined, text: normalizeKoreanText(t.text), completed: t.completed, date: new Date().toISOString() } as Todo)));
+    if (dbEvents) setEvents(dbEvents.map((e: any) => {
+      const [startDate, startTime] = e.start_time ? e.start_time.split('T') : ['', ''];
+      const [endDate, endTime] = e.end_time ? e.end_time.split('T') : ['', ''];
+      return { id: e.id, title: normalizeKoreanText(e.title), date: startDate, startTime: startTime && startTime !== '00:00:00' ? startTime.substring(0, 5) : undefined, endTime: endTime && endTime !== '23:59:59' ? endTime.substring(0, 5) : undefined, description: e.description ? normalizeKoreanText(e.description) : undefined, type: (e.tags && e.tags.length > 0) ? e.tags[0] : 'tag_1' } as CalendarEvent;
+    }));
+    if (dbUserData) {
+      if (Array.isArray(dbUserData.chat_sessions)) setChatSessions(dbUserData.chat_sessions);
+      if (Array.isArray(dbUserData.activity_log)) setActivityLog(dbUserData.activity_log);
+      if (Array.isArray(dbUserData.calendar_tags)) setCalendarTags(dbUserData.calendar_tags);
+      if (dbUserData.settings) setSettings(prev => ({ ...prev, ...dbUserData.settings }));
     }
-    if (dbTodos) setTodos(dbTodos);
-    if (dbJournalCategories) {
-      setJournalCategories(
-        dbJournalCategories.map((category: any) => ({ ...category, name: normalizeKoreanText(category.name) }))
-      );
-    }
+
+    // --- Stage 2: Secondary Data (Journals, Agents, Posts) ---
+    const fetchSecondary = Promise.all([
+      supabase.from('journal_categories').select('*').eq('user_id', userId),
+      supabase.from('journal_entries').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      supabase.from('ai_agents').select('*').eq('user_id', userId).order('order'),
+      supabase.from('community_posts').select('*').eq('user_id', userId).order('timestamp', { ascending: false })
+    ]);
+
+    const secondaryResults = await fetchSecondary;
+    const [
+      { data: dbJournalCategories },
+      { data: dbJournalEntries },
+      { data: dbAiAgents },
+      { data: dbPosts }
+    ] = secondaryResults;
+
+    // Secondary updates
+    if (dbJournalCategories) setJournalCategories(dbJournalCategories.map((category: any) => ({ ...category, name: normalizeKoreanText(category.name) })));
     if (dbJournalEntries) {
-      const categoryNameById = new Map(
-        (dbJournalCategories || []).map((category: any) => [category.id, normalizeKoreanText(category.name)])
-      );
-
-      setEntries(
-        dbJournalEntries.map((entry: any) => {
-          const mood: JournalEntry['mood'] =
-            entry.mood === 'good' || entry.mood === 'bad' || entry.mood === 'neutral'
-              ? entry.mood
-              : 'neutral';
-
-          return {
-            id: entry.id,
-            title: normalizeKoreanText(entry.title || ''),
-            content: normalizeKoreanText(entry.content || ''),
-            date: typeof entry.date === 'string' ? entry.date : new Date().toISOString(),
-            mood,
-            category: entry.category_id ? categoryNameById.get(entry.category_id) || '메모장' : '메모장',
-            order: typeof entry.order === 'number' ? entry.order : 0,
-          } as JournalEntry;
-        })
-      );
+      const catMap = new Map((dbJournalCategories || []).map((c: any) => [c.id, normalizeKoreanText(c.name)]));
+      setEntries(dbJournalEntries.map((e: any) => ({ id: e.id, title: normalizeKoreanText(e.title || ''), content: normalizeKoreanText(e.content || ''), date: e.date, mood: e.mood, category: e.category_id ? catMap.get(e.category_id) || '메모장' : '메모장', order: e.order || 0 } as JournalEntry)));
     }
-    if (dbEvents) setEvents(dbEvents);
-    if (dbAiAgents && dbAiAgents.length > 0) {
-      setAiAgents(
-        dbAiAgents.map((agent: any, index: number) => normalizeAIAgent(agent, index))
-      );
-    } else if (aiAgents.length > 0) {
-      try {
-        await persistAiAgentsForUser(userId, aiAgents);
-      } catch (error) {
-        console.error('Failed to bootstrap AI agents into Supabase:', error);
-      }
-    }
+    if (dbAiAgents) setAiAgents(dbAiAgents.map((a: any, i: number) => normalizeAIAgent(a, i)));
+    if (dbPosts) setCommunityPosts((dbPosts || []).map(normalizeCommunityPost).filter(p => !!p.id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
 
-    const localCommunityPosts = loadFromStorage<CommunityPost[]>('ls_community', [])
-      .map(normalizeCommunityPost)
-      .filter(post => !!post.id);
-    const normalizedDbPosts = (dbPosts || [])
-      .map(normalizeCommunityPost)
-      .filter(post => !!post.id);
-    const dbPostIds = new Set(normalizedDbPosts.map(post => post.id));
-    const unsyncedLocalPosts = localCommunityPosts.filter(post => !dbPostIds.has(post.id));
-
-    if (unsyncedLocalPosts.length > 0) {
-      const { error: postSyncError } = await supabase.from('community_posts').upsert(
-        unsyncedLocalPosts.map(post => ({
-          id: post.id,
-          user_id: userId,
-          author: post.author,
-          content: post.content,
-          timestamp: post.timestamp,
-          reply_to: post.replyTo,
-          trigger: post.trigger,
-          order: post.order ?? 0,
-        })),
-        { onConflict: 'id' }
-      );
-
-      if (postSyncError) {
-        console.error('Failed to sync local AI posts:', postSyncError);
-      }
-    }
-
-    const mergedPostsMap = new Map<string, CommunityPost>();
-    normalizedDbPosts.forEach(post => mergedPostsMap.set(post.id, post));
-    localCommunityPosts.forEach(localPost => {
-      const existing = mergedPostsMap.get(localPost.id);
-      mergedPostsMap.set(localPost.id, existing ? { ...existing, ...localPost } : localPost);
-    });
-
-    const mergedPosts = Array.from(mergedPostsMap.values()).sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-    setCommunityPosts(mergedPosts);
+    console.log(`[App] Data load complete for user ${userId}. Enabling sync hooks.`);
+    setIsDataLoaded(true);
+    isFetchingRef.current = false;
+    // v2.5: Wait a short delay after load to ensure effects don't catch the initial state change as a user-edit
+    setTimeout(() => {
+      skipSyncRef.current = false;
+    }, 1000);
   };
 
-  const handleLogout = async () => {
-    if (window.confirm('로그아웃 하시겠습니까?')) {
-      await supabase.auth.signOut();
-      setCurrentUser(null);
-      localStorage.removeItem('lifesync_user');
-      window.location.reload(); // Reset state
-    }
-  };
+  const handleLogout = logout;
 
   useEffect(() => {
     const listIds = new Set(todoLists.map(l => l.id));
@@ -911,7 +754,7 @@ const App: React.FC = () => {
     // Signed-in users use server-side queue processing to avoid duplicate calls.
     if (currentUser) return;
     if (!settings.autoAiReactions) return;
-    const recentChats = loadFromStorage<ChatObservation[]>(CHAT_OBSERVATIONS_KEY, []).slice(-8);
+    const recentChats = recentChatObservationsRef.current.slice(-8);
 
     const enrichedContext: TriggerContext = {
       ...context,
@@ -962,7 +805,6 @@ const App: React.FC = () => {
     if (currentUser) return;
 
     const FOUR_HOURS = 4;
-    const storageKey = 'ls_last_scheduled_post_key';
     const RECENT_ACTIVITY_WINDOW_MS = FOUR_HOURS * 60 * 60 * 1000;
 
     const getLocalBucketKey = (date: Date) => {
@@ -989,12 +831,9 @@ const App: React.FC = () => {
       if (!hasRecentActivity(now)) return;
 
       const key = getLocalBucketKey(now);
-      const saved = localStorage.getItem(storageKey);
-
-      if (saved === key || scheduledPostKeyRef.current === key) return;
+      if (scheduledPostKeyRef.current === key) return;
 
       scheduledPostKeyRef.current = key;
-      localStorage.setItem(storageKey, key);
 
       triggerAI({
         trigger: 'scheduled_digest',
@@ -1212,7 +1051,7 @@ const App: React.FC = () => {
       agents: aiAgents,
       settings,
       activityLog,
-      userName: localStorage.getItem('ls_userName') || '',
+      userName: currentUser?.name || '',
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1264,47 +1103,65 @@ const App: React.FC = () => {
     setActivityLog([]);
     setSelectedJournalId(null);
     setSelectedAiPostId(null);
-
-    ['ls_events', 'ls_todos', 'ls_entries', 'ls_posts', 'ls_community', 'ls_activity', 'ls_userName', 'ls_todo_lists', 'ls_agents'].forEach(key => {
-      localStorage.removeItem(key);
-    });
   };
 
   const handleClearActivity = () => {
     setActivityLog([]);
-    localStorage.removeItem('ls_activity');
   };
 
   const handleClearPosts = () => {
     setPosts([]);
     setCommunityPosts([]);
-    localStorage.removeItem('ls_posts');
-    localStorage.removeItem('ls_community');
   };
 
   const handleClearEvents = () => {
     setEvents([]);
-    localStorage.removeItem('ls_events');
   };
 
   const handleClearTodos = () => {
     setTodos([]);
     setTodoLists(DEFAULT_TODO_LISTS);
-    localStorage.removeItem('ls_todos');
-    localStorage.removeItem('ls_todo_lists');
   };
 
   const handleClearEntries = () => {
     setEntries([]);
-    localStorage.removeItem('ls_entries');
   };
 
   const handleClearChat = () => {
     setChatSessions([]);
     setActiveChatSessionId(null);
-    localStorage.removeItem('ls_chat_sessions');
-    localStorage.removeItem('ls_active_chat_id');
-    localStorage.removeItem('ls_userName');
+  };
+
+  const handleManualSync = async () => {
+    if (!currentUser) {
+      alert('로그인이 필요합니다.');
+      return;
+    }
+    const confirmSync = window.confirm('지금 동기화를 진행하시겠습니까?\n이 작업은 PC의 데이터를 서버로 강제 전송합니다.');
+    if (!confirmSync) return;
+
+    try {
+      const result = await debugManualSync(currentUser.id, {
+        events,
+        todos,
+        todoLists,
+        entries,
+        journalCategories,
+        communityPosts,
+        aiAgents,
+        settings,
+        activityLog,
+        calendarTags
+      });
+
+      if (result.success) {
+        alert('동기화 성공!\n\n' + result.logs.join('\n'));
+      } else {
+        alert('동기화 실패:\n' + (result.error || '알 수 없는 오류') + '\n\n로그:\n' + result.logs.join('\n'));
+      }
+    } catch (e: any) {
+      alert('동기화 중 오류 발생: ' + e.message);
+    }
   };
 
   // Handlers with AI triggers
@@ -1784,7 +1641,6 @@ const App: React.FC = () => {
 
   const updateUser = async (updatedUser: User) => {
     setCurrentUser(updatedUser);
-    saveToStorage('lifesync_user', updatedUser);
     if (currentUser) {
       await supabase.from('profiles').update({
         name: updatedUser.name,
@@ -1794,7 +1650,7 @@ const App: React.FC = () => {
   };
 
   const navItems: { id: ViewState; label: string; icon: React.ElementType }[] = [
-    { id: 'chat', label: 'AI 채팅', icon: MessageCircle },
+    { id: 'chat', label: '새 채팅', icon: MessageCircle },
     { id: 'board', label: 'AI 일기장', icon: Sparkles },
     { id: 'calendar', label: '캘린더', icon: CalendarIcon },
     { id: 'todo', label: '할 일', icon: CheckSquare },
@@ -1871,6 +1727,7 @@ const App: React.FC = () => {
             onClearTodos={handleClearTodos}
             onClearEntries={handleClearEntries}
             onClearChat={handleClearChat}
+            onManualSync={handleManualSync}
           />
         );
       case 'chat':
@@ -1954,6 +1811,7 @@ const App: React.FC = () => {
             initialMessages={activeSession?.messages}
             currentSessionId={activeChatSessionId}
             personaMemoryContextByAgent={personaMemoryContextByAgent}
+            defaultUserName={currentUser?.name || ''}
             onUpdateMessages={(sessionId: string, messages: ChatMessage[]) => {
               setChatSessions((prev: ChatSession[]) => {
                 let changed = false;
@@ -1970,23 +1828,20 @@ const App: React.FC = () => {
 
                   const lastMsg = messages[messages.length - 1];
                   const nextLastMessageAt = lastMsg?.timestamp || s.lastMessageAt;
+
+                  // Maintain current user selected agentIds; do not drop them just because they haven't spoken yet
+                  const currentAgentIds = dedupeAgentIds([
+                    ...(Array.isArray(s.agentIds) ? s.agentIds : []),
+                  ]);
+
+                  // For the primary agentId fallback
                   const messageAgentIds = dedupeAgentIds(
                     messages
                       .filter((message: ChatMessage) => message.role === 'assistant')
                       .map((message: ChatMessage) => message.agentId)
                   );
-                  const preservedAgentIds = dedupeAgentIds([
-                    ...(Array.isArray(s.agentIds) ? s.agentIds : []),
-                    s.agentId,
-                  ]);
-                  const mergedAgentIds = messageAgentIds.length > 0
-                    ? messageAgentIds
-                    : preservedAgentIds;
-                  const nextAgentId = mergedAgentIds[0] || s.agentId;
-                  const currentAgentIds = dedupeAgentIds([
-                    ...(Array.isArray(s.agentIds) ? s.agentIds : []),
-                  ]);
-                  const nextAgentIds = mergedAgentIds.length > 0 ? mergedAgentIds : currentAgentIds;
+                  const nextAgentId = messageAgentIds.length > 0 ? messageAgentIds[0] : s.agentId;
+                  const nextAgentIds = currentAgentIds.length > 0 ? currentAgentIds : (messageAgentIds.length > 0 ? messageAgentIds : [s.agentId]);
 
                   const unchanged =
                     isSameChatMessageList(s.messages, messages) &&
@@ -2036,20 +1891,14 @@ const App: React.FC = () => {
     setIsMobileMenuOpen(false);
   };
 
-  if (showAuth && !currentUser) {
+  if (!currentUser && isAuthInitializing) {
+    return <div className="min-h-screen bg-white" />;
+  }
+
+  if (!currentUser) {
     return (
       <div className="min-h-screen bg-white relative animate-in fade-in duration-300">
-        <button
-          onClick={() => setShowAuth(false)}
-          className="absolute top-8 right-8 z-[110] p-2 text-[#787774] hover:text-[#37352f] hover:bg-[#efefef] rounded-full transition-all"
-          aria-label="닫기"
-        >
-          <X size={24} />
-        </button>
-        <AuthView initialMode={authMode} onLogin={(user) => {
-          setCurrentUser(user);
-          setShowAuth(false);
-        }} />
+        <AuthView initialMode={authMode} onLogin={(user) => setCurrentUser(user)} />
       </div>
     );
   }
@@ -2058,6 +1907,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-[100dvh] bg-[#fbfbfa] font-sans selection:bg-[#2ecc71]/20 relative overflow-x-hidden">
+      {/* Full Page Loading Overlay Removed in v2.6 for "Instant" feel */}
       {/* Sidebar Navigation */}
       <aside className="hidden lg:flex w-16 lg:w-[240px] bg-[#f7f7f5] border-r border-[#e9e9e8] flex-col justify-between transition-all duration-300 z-50 flex-shrink-0">
         <div>
@@ -2115,7 +1965,7 @@ const App: React.FC = () => {
                       .slice(0, 5)
                       .map(session => (
                         <div key={session.id} className="group relative">
-                          <button
+                          <div
                             onClick={() => {
                               const resolvedAgentIds = resolveSessionAgentIds(session, aiAgents, activeChatAgentIds);
                               setActiveChatSessionId(session.id);
@@ -2130,16 +1980,34 @@ const App: React.FC = () => {
                                   : s));
                               }
                             }}
-                            className={`w-full text-left px-3 py-1.5 rounded-[4px] transition-colors text-sm group ${activeChatSessionId === session.id
+                            className={`w-full text-left px-3 py-1.5 rounded-[4px] cursor-pointer transition-colors text-sm group ${activeChatSessionId === session.id
                               ? 'bg-[#efefef] text-[#37352f] font-medium'
                               : 'text-[#787774] hover:bg-[#efefef] hover:text-[#37352f]'
                               }`}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                const resolvedAgentIds = resolveSessionAgentIds(session, aiAgents, activeChatAgentIds);
+                                setActiveChatSessionId(session.id);
+                                setActiveChatAgentIds(resolvedAgentIds);
+                                const normalizedSessionIds = dedupeAgentIds([
+                                  ...(Array.isArray(session.agentIds) ? session.agentIds : []),
+                                  session.agentId,
+                                ]);
+                                if (session.agentId !== resolvedAgentIds[0] || !isSameAgentIdList(normalizedSessionIds, resolvedAgentIds)) {
+                                  setChatSessions(prev => prev.map(s => s.id === session.id
+                                    ? { ...s, agentId: resolvedAgentIds[0], agentIds: resolvedAgentIds }
+                                    : s));
+                                }
+                              }
+                            }}
                           >
                             <div className="flex items-center">
                               <MessageCircle size={14} className="mr-2.5 opacity-40 shrink-0" />
-                              <span className="truncate flex-1">{session.title}</span>
+                              <span className="truncate flex-1 pr-6">{session.title}</span>
                             </div>
-                          </button>
+                          </div>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2148,7 +2016,8 @@ const App: React.FC = () => {
                                 if (activeChatSessionId === session.id) setActiveChatSessionId(null);
                               }
                             }}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 hover:bg-[#d9d9d8] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 hover:bg-[#d9d9d8] z-10 rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                            aria-label="채팅 삭제"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -2469,14 +2338,34 @@ const App: React.FC = () => {
                     currentUser?.name?.[0] || 'U'
                   )}
                 </div>
-                <span className="text-xs font-bold text-[#37352f] truncate">{currentUser?.name}</span>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-[#37352f] truncate">{currentUser?.name}</span>
+                    <span className="text-[9px] text-[#9b9a97] font-medium leading-none">v2.6.0</span>
+                  </div>
+                  {!isDataLoaded && (
+                    <span className="text-[9px] text-[#eb5757] font-semibold flex items-center gap-1 mt-0.5 animate-pulse">
+                      <span className="w-1 h-1 rounded-full bg-[#eb5757]" />
+                      데이터 로딩 중...
+                    </span>
+                  )}
+                  {isDataLoaded && syncStatus === 'error' && (
+                    <span className="text-[9px] text-[#eb5757] font-bold flex items-center gap-1 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#eb5757]" />
+                      저장 오류 (RLS 고장)
+                    </span>
+                  )}
+                </div>
               </div>
               <button
+                type="button"
                 onClick={handleLogout}
-                className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors flex-shrink-0"
+                disabled={isLoggingOut}
+                className="flex items-center gap-1 px-2 py-1.5 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors flex-shrink-0 text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
                 title="로그아웃"
               >
                 <LogOut size={14} />
+                <span>{isLoggingOut ? '처리 중...' : '로그아웃'}</span>
               </button>
             </div>
           ) : (
@@ -2484,7 +2373,6 @@ const App: React.FC = () => {
               <button
                 onClick={() => {
                   setAuthMode('login');
-                  setShowAuth(true);
                 }}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#37352f] text-white text-[11px] font-bold rounded-lg hover:bg-black transition-all shadow-sm"
               >
@@ -2523,7 +2411,6 @@ const App: React.FC = () => {
             <button
               onClick={() => {
                 setAuthMode('login');
-                setShowAuth(true);
               }}
               className="text-[11px] font-semibold text-[#37352f] px-2.5 py-1 rounded-md border border-[#e9e9e8] bg-white"
             >
@@ -2675,15 +2562,18 @@ const App: React.FC = () => {
                     <span className="text-xs font-semibold text-[#37352f] truncate">{currentUser?.name}</span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       setIsMobileMenuOpen(false);
                       handleLogout();
                     }}
-                    className="p-1.5 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors"
+                    disabled={isLoggingOut}
+                    className="flex items-center gap-1 px-2 py-1.5 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#eb5757] transition-colors text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
                     title="로그아웃"
                     aria-label="로그아웃"
                   >
                     <LogOut size={14} />
+                    <span>{isLoggingOut ? '처리 중...' : '로그아웃'}</span>
                   </button>
                 </div>
               ) : (
@@ -2691,7 +2581,6 @@ const App: React.FC = () => {
                   onClick={() => {
                     setIsMobileMenuOpen(false);
                     setAuthMode('login');
-                    setShowAuth(true);
                   }}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#37352f] text-white text-[12px] font-semibold rounded-lg hover:bg-black transition-all"
                 >

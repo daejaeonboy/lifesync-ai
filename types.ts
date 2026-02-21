@@ -76,6 +76,7 @@ export interface AIAgent {
   tone: string;
   color: string;
   avatar?: string;
+  connectionId?: string; // Optional: per-persona API connection override
 }
 
 export interface CommunityPost {
@@ -109,7 +110,7 @@ export interface ActivityItem {
 
 export interface ApiConnection {
   id: string;
-  provider: 'gemini' | 'openai' | 'anthropic' | 'custom';
+  provider: 'gemini' | 'openai' | 'anthropic' | 'xai' | 'custom';
   modelName: string; // e.g. "gemini-3-flash-preview", "gpt-4"
   apiKey: string;
   isActive: boolean;
@@ -144,6 +145,9 @@ export interface ChatMessage {
   content: string;
   timestamp: string; // ISO string
   agentId?: string; // assistant persona id for multi-persona chat
+  provider?: ApiConnection['provider'];
+  modelName?: string;
+  connectionId?: string;
   action?: {
     type: 'add_event' | 'delete_event' | 'add_todo' | 'add_journal' | 'generate_insight' | 'onboarding';
     data?: any;
@@ -162,7 +166,7 @@ export interface ChatSession {
   agentIds?: string[]; // selected AI agent ids for this session (group chat)
 }
 
-export type ChatMode = 'basic' | 'roleplay' | 'learning';
+export type ChatMode = 'basic' | 'learning';
 
 export type ViewState = 'dashboard' | 'calendar' | 'todo' | 'journal' | 'board' | 'chat' | 'settings' | 'api-settings' | 'personas';
 

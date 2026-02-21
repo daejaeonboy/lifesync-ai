@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { AppSettings, ApiConnection } from '../types';
 import { Trash2, Plus, X, CheckCircle2, Circle, FlaskConical } from 'lucide-react';
 import { callGeminiAPI } from '../utils/gemini';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, normalizeGeminiModelName } from '../utils/aiConfig';
+import { testXaiConnection } from '../services/xaiService';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_XAI_MODEL, GEMINI_MODEL_OPTIONS, XAI_MODEL_OPTIONS, normalizeGeminiModelName } from '../utils/aiConfig';
 
 interface ApiSettingsViewProps {
     settings: AppSettings;
@@ -32,6 +33,8 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
         if (byId) return byId;
         return connections.find(c => c.isActive);
     }, [connections, settings.activeConnectionId]);
+
+    const isSelectableProvider = (provider: string) => provider === 'gemini' || provider === 'xai';
 
     const persistConnections = (nextConnections: ApiConnection[], preferredId?: string) => {
         const normalizedConnections = nextConnections.map(connection =>
@@ -65,9 +68,11 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
     };
 
     const updateConnectionModel = (connectionId: string, modelName: string) => {
-        const updated = connections.map(conn =>
-            conn.id === connectionId ? { ...conn, modelName: normalizeGeminiModelName(modelName) } : conn
-        );
+        const updated = connections.map(conn => {
+            if (conn.id !== connectionId) return conn;
+            const normalizedModel = conn.provider === 'gemini' ? normalizeGeminiModelName(modelName) : modelName;
+            return { ...conn, modelName: normalizedModel };
+        });
         persistConnections(updated);
     };
 
@@ -103,27 +108,31 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
     };
 
     const selectModelConnection = (connection: ApiConnection) => {
-        if (connection.provider !== 'gemini') {
-            alert('현재 앱은 Gemini 연결만 AI 기능에 사용합니다.');
+        if (!isSelectableProvider(connection.provider)) {
+            alert('현재 앱은 Gemini 또는 xAI 연결만 AI 기능에 사용합니다.');
             return;
         }
         persistConnections(connections, connection.id);
     };
 
     const testConnection = async (connection: ApiConnection) => {
-        if (connection.provider !== 'gemini') {
-            alert('연결 테스트는 Gemini만 지원합니다.');
+        if (!isSelectableProvider(connection.provider)) {
+            alert('연결 테스트는 Gemini 또는 xAI만 지원합니다.');
             return;
         }
 
         setTestingId(connection.id);
         try {
-            await callGeminiAPI(
-                connection.apiKey,
-                '간단한 연결 테스트입니다. "연결 성공"이라고만 답해주세요.',
-                undefined,
-                connection.modelName
-            );
+            if (connection.provider === 'xai') {
+                await testXaiConnection(connection.apiKey, connection.modelName);
+            } else {
+                await callGeminiAPI(
+                    connection.apiKey,
+                    '간단한 연결 테스트입니다. "연결 성공"이라고만 답해주세요.',
+                    undefined,
+                    connection.modelName
+                );
+            }
             alert(`테스트 성공: ${connection.modelName}`);
         } catch (error: any) {
             alert(`테스트 실패: ${error?.message || '알 수 없는 오류'}`);
@@ -140,7 +149,7 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                         API 연결 설정
                     </h1>
                     <p className="text-[#9b9a97] text-lg font-medium">
-                        Gemini 모델을 목록에서 선택하면 채팅/인사이트/AI 코멘트가 해당 모델로 실행됩니다.
+                        Gemini 또는 xAI 모델을 목록에서 선택하면 채팅/인사이트/AI 코멘트가 해당 모델로 실행됩니다.
                     </p>
                 </div>
             </div>
@@ -174,6 +183,9 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                 {connections.map(conn => {
                     const isSelected = conn.id === selectedConnection?.id;
                     const isGemini = conn.provider === 'gemini';
+                    const isXai = conn.provider === 'xai';
+                    const isSelectable = isGemini || isXai;
+                    const hasModelDropdown = isGemini || isXai;
 
                     return (
                         <div
@@ -184,7 +196,7 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                                 <button
                                     onClick={() => selectModelConnection(conn)}
                                     className={`w-5 h-5 rounded-full flex items-center justify-center ${isSelected ? 'text-[#27c93f]' : 'text-[#d3d1cb]'}`}
-                                    title={isGemini ? '이 모델 사용' : 'Gemini만 선택 가능'}
+                                    title={isSelectable ? '이 모델 사용' : 'Gemini/xAI만 선택 가능'}
                                 >
                                     {isSelected ? <CheckCircle2 size={18} /> : <Circle size={18} />}
                                 </button>
@@ -194,13 +206,13 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                                         <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-[#f1f1f0] text-[#787774] rounded">
                                             {conn.provider}
                                         </span>
-                                        {isGemini ? (
+                                        {hasModelDropdown ? (
                                             <select
                                                 value={conn.modelName}
                                                 onChange={(e) => updateConnectionModel(conn.id, e.target.value)}
                                                 className="text-sm font-semibold border border-[#e9e9e8] rounded-lg px-2 py-1 bg-white"
                                             >
-                                                {GEMINI_MODEL_OPTIONS.map(model => (
+                                                {(isGemini ? GEMINI_MODEL_OPTIONS : XAI_MODEL_OPTIONS).map(model => (
                                                     <option key={model.id} value={model.id}>
                                                         {model.label}
                                                     </option>
@@ -217,21 +229,21 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => selectModelConnection(conn)}
-                                    disabled={!isGemini}
+                                    disabled={!isSelectable}
                                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected
                                         ? 'bg-[#e5f9e7] text-[#27c93f]'
-                                        : isGemini
+                                        : isSelectable
                                             ? 'bg-[#f1f1f0] text-[#37352f] hover:bg-[#e9e9e8]'
                                             : 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed'
                                         }`}
                                 >
-                                    {isSelected ? '사용 중' : isGemini ? '사용하기' : '준비중'}
+                                    {isSelected ? '사용 중' : isSelectable ? '사용하기' : '준비중'}
                                 </button>
 
                                 <button
                                     onClick={() => testConnection(conn)}
-                                    disabled={!isGemini || testingId === conn.id}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${!isGemini
+                                    disabled={!isSelectable || testingId === conn.id}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${!isSelectable
                                         ? 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed'
                                         : 'bg-[#eef5ff] text-[#2b6de9] hover:bg-[#e0ecff]'
                                         }`}
@@ -266,23 +278,28 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
 
                         <div>
                             <label className="block text-sm font-bold mb-2">Provider</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                {(['gemini', 'openai', 'anthropic', 'custom'] as const).map(provider => (
-                                    <button
-                                        key={provider}
-                                        onClick={() => setNewConnection({
-                                            ...newConnection,
-                                            provider,
-                                            modelName: provider === 'gemini' ? DEFAULT_GEMINI_MODEL : ''
-                                        })}
-                                        className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${newConnection.provider === provider
-                                            ? 'border-[#37352f] bg-[#37352f] text-white shadow-md'
-                                            : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'
-                                            }`}
-                                    >
-                                        {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                    </button>
-                                ))}
+                            <div className="grid grid-cols-3 gap-2">
+                                {(['gemini', 'xai', 'openai', 'anthropic', 'custom'] as const).map(provider => {
+                                    const displayName = provider === 'xai' ? 'xAI' : provider.charAt(0).toUpperCase() + provider.slice(1);
+                                    return (
+                                        <button
+                                            key={provider}
+                                            onClick={() => setNewConnection({
+                                                ...newConnection,
+                                                provider,
+                                                modelName: provider === 'gemini' ? DEFAULT_GEMINI_MODEL
+                                                    : provider === 'xai' ? DEFAULT_XAI_MODEL
+                                                        : ''
+                                            })}
+                                            className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${newConnection.provider === provider
+                                                ? 'border-[#37352f] bg-[#37352f] text-white shadow-md'
+                                                : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'
+                                                }`}
+                                        >
+                                            {displayName}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -295,6 +312,18 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                                     className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
                                 >
                                     {GEMINI_MODEL_OPTIONS.map(model => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : newConnection.provider === 'xai' ? (
+                                <select
+                                    value={newConnection.modelName || DEFAULT_XAI_MODEL}
+                                    onChange={e => setNewConnection({ ...newConnection, modelName: e.target.value })}
+                                    className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10"
+                                >
+                                    {XAI_MODEL_OPTIONS.map(model => (
                                         <option key={model.id} value={model.id}>
                                             {model.label}
                                         </option>
@@ -315,7 +344,7 @@ const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({ settings, onUpdateSet
                             <label className="block text-sm font-bold mb-2">API Key</label>
                             <input
                                 type="password"
-                                placeholder="AIza... / sk-..."
+                                placeholder={newConnection.provider === 'xai' ? 'xai-...' : 'AIza... / sk-...'}
                                 value={newConnection.apiKey || ''}
                                 onChange={e => setNewConnection({ ...newConnection, apiKey: e.target.value })}
                                 className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] focus:ring-2 focus:ring-[#37352f]/10 font-mono text-sm"

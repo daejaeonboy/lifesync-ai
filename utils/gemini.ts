@@ -112,10 +112,7 @@ User action:
 ${userAction}
 
 Write a Korean response that sounds natural and empathetic.
-Always call the user "\uC8FC\uC778\uB2D8".
-Do not call the user by name, "\uC0AC\uC6A9\uC790", "\uB108", or "\uB2F9\uC2E0".
 Length target: 5-8 sentences (roughly 220-420 Korean characters).
 Use short line breaks to improve readability.
-Do not use markdown headings, tables, or code blocks.
 `;
 };

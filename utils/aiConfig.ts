@@ -1,11 +1,29 @@
 import { AppSettings, ApiConnection } from '../types';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+export const DEFAULT_XAI_MODEL = 'grok-4-1-fast-reasoning';
 
 export interface GeminiModelOption {
     id: string;
     label: string;
 }
+
+export interface XaiModelOption {
+    id: string;
+    label: string;
+}
+
+export const XAI_MODEL_OPTIONS: XaiModelOption[] = [
+    { id: 'grok-4-1-fast-reasoning', label: 'Grok 4.1 Fast Reasoning' },
+    { id: 'grok-4-1-fast-non-reasoning', label: 'Grok 4.1 Fast Non-Reasoning' },
+    { id: 'grok-code-fast-1', label: 'Grok Code Fast 1' },
+    { id: 'grok-4-fast-reasoning', label: 'Grok 4 Fast Reasoning' },
+    { id: 'grok-4-fast-non-reasoning', label: 'Grok 4 Fast Non-Reasoning' },
+    { id: 'grok-4-0709', label: 'Grok 4 (0709)' },
+    { id: 'grok-3-mini', label: 'Grok 3 Mini' },
+    { id: 'grok-3', label: 'Grok 3' },
+    { id: 'grok-2-vision-1212', label: 'Grok 2 Vision (1212)' },
+];
 
 export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
@@ -37,47 +55,127 @@ export interface ActiveGeminiConfig {
     modelName: string;
 }
 
+export interface ActiveAIConfig {
+    connectionId?: string;
+    provider: ApiConnection['provider'];
+    apiKey: string;
+    modelName: string;
+}
+
+const CHAT_SUPPORTED_PROVIDERS: ApiConnection['provider'][] = ['gemini', 'xai'];
+
+export const isChatSupportedProvider = (provider: ApiConnection['provider']): boolean => {
+    return CHAT_SUPPORTED_PROVIDERS.includes(provider);
+};
+
 const hasUsableKey = (connection: ApiConnection): boolean => {
     return typeof connection.apiKey === 'string' && connection.apiKey.trim().length > 0;
 };
 
-export const getActiveGeminiConfig = (settings: AppSettings): ActiveGeminiConfig | null => {
+export const getActiveAIConfig = (settings: AppSettings): ActiveAIConfig | null => {
     const connections = settings.apiConnections || [];
 
+    // 1. Try the explicitly selected connection
     const selected = connections.find(
         c =>
             c.id === settings.activeConnectionId &&
-            c.provider === 'gemini' &&
             c.isActive &&
             hasUsableKey(c)
     );
 
     if (selected) {
+        const modelName = selected.provider === 'gemini'
+            ? normalizeGeminiModelName(selected.modelName)
+            : selected.modelName;
         return {
             connectionId: selected.id,
+            provider: selected.provider,
             apiKey: selected.apiKey,
-            modelName: normalizeGeminiModelName(selected.modelName),
+            modelName,
         };
     }
 
-    const firstActiveGemini = connections.find(
-        c => c.provider === 'gemini' && c.isActive && hasUsableKey(c)
-    );
-
-    if (firstActiveGemini) {
+    // 2. Fallback to first active connection
+    const firstActive = connections.find(c => c.isActive && hasUsableKey(c));
+    if (firstActive) {
+        const modelName = firstActive.provider === 'gemini'
+            ? normalizeGeminiModelName(firstActive.modelName)
+            : firstActive.modelName;
         return {
-            connectionId: firstActiveGemini.id,
-            apiKey: firstActiveGemini.apiKey,
-            modelName: normalizeGeminiModelName(firstActiveGemini.modelName),
+            connectionId: firstActive.id,
+            provider: firstActive.provider,
+            apiKey: firstActive.apiKey,
+            modelName,
         };
     }
 
+    // 3. Legacy geminiApiKey fallback
     if (typeof settings.geminiApiKey === 'string' && settings.geminiApiKey.trim().length > 0) {
         return {
+            provider: 'gemini',
             apiKey: settings.geminiApiKey,
             modelName: DEFAULT_GEMINI_MODEL,
         };
     }
 
+    return null;
+};
+
+/**
+ * Resolve the AI config for a specific agent.
+ * This function is strict for persona chat:
+ * - If the agent has no connectionId, return null.
+ * - If the connection is invalid or unsupported, return null.
+ */
+export const getAgentAIConfig = (settings: AppSettings, agentConnectionId?: string): ActiveAIConfig | null => {
+    if (!agentConnectionId) {
+        return null;
+    }
+
+    const connections = settings.apiConnections || [];
+    const agentConnection = connections.find(c => c.id === agentConnectionId);
+
+    if (agentConnection) {
+        if (!hasUsableKey(agentConnection)) {
+            console.warn('[aiConfig] Agent connection has no usable apiKey:', agentConnectionId);
+            return null;
+        }
+        if (!isChatSupportedProvider(agentConnection.provider)) {
+            console.warn('[aiConfig] Agent connection provider is not supported in chat:', agentConnection.provider);
+            return null;
+        }
+        console.log('[aiConfig] Found specific connection for agent:', agentConnection.modelName);
+        const modelName = agentConnection.provider === 'gemini'
+            ? normalizeGeminiModelName(agentConnection.modelName)
+            : agentConnection.modelName;
+        return {
+            connectionId: agentConnection.id,
+            provider: agentConnection.provider,
+            apiKey: agentConnection.apiKey,
+            modelName,
+        };
+    }
+
+    console.warn('[aiConfig] Agent has connectionId but not found or invalid:', agentConnectionId);
+    return null;
+};
+
+/** @deprecated Use getActiveAIConfig instead. Kept for backward compatibility. */
+export const getActiveGeminiConfig = (settings: AppSettings): ActiveGeminiConfig | null => {
+    const config = getActiveAIConfig(settings);
+    if (!config) return null;
+    // If active connection is Gemini, return it. Otherwise try to find a Gemini fallback.
+    if (config.provider === 'gemini') {
+        return { connectionId: config.connectionId, apiKey: config.apiKey, modelName: config.modelName };
+    }
+    // Fallback: look for any active Gemini connection
+    const connections = settings.apiConnections || [];
+    const gemini = connections.find(c => c.provider === 'gemini' && c.isActive && hasUsableKey(c));
+    if (gemini) {
+        return { connectionId: gemini.id, apiKey: gemini.apiKey, modelName: normalizeGeminiModelName(gemini.modelName) };
+    }
+    if (typeof settings.geminiApiKey === 'string' && settings.geminiApiKey.trim().length > 0) {
+        return { apiKey: settings.geminiApiKey, modelName: DEFAULT_GEMINI_MODEL };
+    }
     return null;
 };

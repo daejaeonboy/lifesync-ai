@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { AIAgent, AppSettings, ApiConnection, User } from '../types';
 import { Plus, Trash2, Save, RotateCcw, Download, Trash, Edit3, X, CheckCircle2, Circle, FlaskConical, Upload, Image as ImageIcon } from 'lucide-react';
 import { callGeminiAPI } from '../utils/gemini';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, normalizeGeminiModelName } from '../utils/aiConfig';
+import { testXaiConnection } from '../services/xaiService';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_XAI_MODEL, GEMINI_MODEL_OPTIONS, XAI_MODEL_OPTIONS, normalizeGeminiModelName } from '../utils/aiConfig';
 import PersonaSettingsView from './PersonaSettingsView';
 
 type SettingsTab = 'account' | 'api' | 'persona' | 'data';
@@ -22,6 +23,7 @@ interface SettingsViewProps {
     onClearTodos: () => void;
     onClearEntries: () => void;
     onClearChat: () => void;
+    onManualSync: () => Promise<void>;
 }
 
 const maskApiKey = (key: string): string => {
@@ -45,6 +47,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     onClearTodos,
     onClearEntries,
     onClearChat,
+    onManualSync,
 }) => {
     const [activeTab, setActiveTab] = useState<SettingsTab>('account');
 
@@ -83,14 +86,22 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                 ? preferredId
                 : settings.activeConnectionId && normalizedConnections.some(c => c.id === settings.activeConnectionId)
                     ? settings.activeConnectionId
-                    : normalizedConnections.find(c => c.isActive)?.id || normalizedConnections[0]?.id;
-        const normalized = normalizedConnections.map(c => ({ ...c, isActive: c.id === resolvedId }));
-        const activeGemini = normalized.find(c => c.id === resolvedId && c.provider === 'gemini') || normalized.find(c => c.provider === 'gemini' && c.isActive);
+                    : normalizedConnections[0]?.id;
+        // Keep ALL connections isActive:true — activeConnectionId tracks the global default
+        const normalized = normalizedConnections.map(c => ({ ...c, isActive: true }));
+        const activeGemini = normalized.find(c => c.id === resolvedId && c.provider === 'gemini') || normalized.find(c => c.provider === 'gemini');
         onUpdateSettings({ ...settings, apiConnections: normalized, activeConnectionId: resolvedId, geminiApiKey: activeGemini?.apiKey || settings.geminiApiKey });
     };
     const updateConnectionModel = (connectionId: string, modelName: string) => {
-        persistConnections(connections.map(c => c.id === connectionId ? { ...c, modelName: normalizeGeminiModelName(modelName) } : c));
+        const updated = connections.map(conn => {
+            if (conn.id !== connectionId) return conn;
+            const normalized = conn.provider === 'gemini' ? normalizeGeminiModelName(modelName) : modelName;
+            return { ...conn, modelName: normalized };
+        });
+        persistConnections(updated);
     };
+
+    const isSelectableProvider = (provider: string) => provider === 'gemini' || provider === 'xai';
     const addConnection = () => {
         const provider = (newConnection.provider as ApiConnection['provider']) || 'gemini';
         const modelName = (newConnection.modelName || '').trim();
@@ -112,14 +123,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         persistConnections(connections.filter(c => c.id !== id));
     };
     const selectModelConnection = (conn: ApiConnection) => {
-        if (conn.provider !== 'gemini') { alert('현재 앱은 Gemini 연결만 AI 기능에 사용합니다.'); return; }
+        if (!isSelectableProvider(conn.provider)) { alert('현재 앱은 Gemini 또는 xAI 연결만 AI 기능에 사용합니다.'); return; }
         persistConnections(connections, conn.id);
     };
     const testConnection = async (conn: ApiConnection) => {
-        if (conn.provider !== 'gemini') { alert('연결 테스트는 Gemini만 지원합니다.'); return; }
+        if (!isSelectableProvider(conn.provider)) { alert('연결 테스트는 Gemini 또는 xAI만 지원합니다.'); return; }
         setTestingId(conn.id);
         try {
-            await callGeminiAPI(conn.apiKey, '간단한 연결 테스트입니다. "연결 성공"이라고만 답해주세요.', undefined, conn.modelName);
+            if (conn.provider === 'xai') {
+                await testXaiConnection(conn.apiKey, conn.modelName);
+            } else {
+                await callGeminiAPI(conn.apiKey, '간단한 연결 테스트입니다. "연결 성공"이라고만 답해주세요.', undefined, conn.modelName);
+            }
             alert(`테스트 성공: ${conn.modelName}`);
         } catch (error: any) {
             alert(`테스트 실패: ${error?.message || '알 수 없는 오류'}`);
@@ -251,10 +266,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             {activeTab === 'api' && (
                 <div className="space-y-6">
                     <div className="bg-white border border-[#e9e9e8] rounded-xl p-5">
-                        <p className="text-sm text-[#787774]">현재 사용 모델</p>
+                        <p className="text-sm text-[#787774]">현재 선택된 API 연결</p>
                         <p className="text-lg font-bold mt-1 text-[#37352f]">
                             {selectedConnection ? `${selectedConnection.modelName} (${selectedConnection.provider})` : '선택된 모델 없음'}
                         </p>
+                        <p className="text-xs text-[#9b9a97] mt-2">채팅 페르소나는 각자 지정된 연결을 사용합니다. 페르소나 설정에서 연결을 지정하세요.</p>
                     </div>
 
                     <div className="space-y-4">
@@ -274,6 +290,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                         {connections.map(conn => {
                             const isSelected = conn.id === selectedConnection?.id;
                             const isGemini = conn.provider === 'gemini';
+                            const isXai = conn.provider === 'xai';
+                            const isSelectable = isGemini || isXai;
+                            const hasModelDropdown = isGemini || isXai;
                             return (
                                 <div key={conn.id} className={`bg-white border rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 transition-all ${isSelected ? 'border-[#37352f] shadow-sm' : 'border-[#e9e9e8]'}`}>
                                     <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
@@ -283,9 +302,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-[#f1f1f0] text-[#787774] rounded">{conn.provider}</span>
-                                                {isGemini ? (
+                                                {hasModelDropdown ? (
                                                     <select value={conn.modelName} onChange={(e) => updateConnectionModel(conn.id, e.target.value)} className="text-sm font-semibold border border-[#e9e9e8] rounded-lg px-2 py-1 bg-white w-full sm:w-auto min-w-0">
-                                                        {GEMINI_MODEL_OPTIONS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                                                        {(isGemini ? GEMINI_MODEL_OPTIONS : XAI_MODEL_OPTIONS).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
                                                     </select>
                                                 ) : <span className="font-bold text-sm">{conn.modelName}</span>}
                                             </div>
@@ -293,10 +312,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
-                                        <button onClick={() => selectModelConnection(conn)} disabled={!isGemini} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-[#e5f9e7] text-[#27c93f]' : isGemini ? 'bg-[#f1f1f0] text-[#37352f] hover:bg-[#e9e9e8]' : 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed'}`}>
-                                            {isSelected ? '사용 중' : isGemini ? '사용하기' : '준비중'}
+                                        <button onClick={() => selectModelConnection(conn)} disabled={!isSelectable} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-[#e5f9e7] text-[#27c93f]' : isSelectable ? 'bg-[#f1f1f0] text-[#37352f] hover:bg-[#e9e9e8]' : 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed'}`}>
+                                            {isSelected ? '선택됨' : isSelectable ? '선택' : '준비중'}
                                         </button>
-                                        <button onClick={() => testConnection(conn)} disabled={!isGemini || testingId === conn.id} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${!isGemini ? 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed' : 'bg-[#eef5ff] text-[#2b6de9] hover:bg-[#e0ecff]'}`}>
+                                        <button onClick={() => testConnection(conn)} disabled={!isSelectable || testingId === conn.id} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${!isSelectable ? 'bg-[#f7f7f5] text-[#b4b3af] cursor-not-allowed' : 'bg-[#eef5ff] text-[#2b6de9] hover:bg-[#e0ecff]'}`}>
                                             <span className="inline-flex items-center gap-1.5"><FlaskConical size={13} />{testingId === conn.id ? '테스트 중...' : '연결 테스트'}</span>
                                         </button>
                                         <button onClick={() => deleteConnection(conn.id)} className="p-2 text-[#9b9a97] hover:text-[#eb5757] hover:bg-[#fff0f0] rounded-lg transition-colors"><Trash2 size={16} /></button>
@@ -334,13 +353,16 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">Provider</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {(['gemini', 'openai', 'anthropic', 'custom'] as const).map(provider => (
-                                            <button key={provider} onClick={() => setNewConnection({ ...newConnection, provider, modelName: provider === 'gemini' ? DEFAULT_GEMINI_MODEL : '' })}
-                                                className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${newConnection.provider === provider ? 'border-[#37352f] bg-[#37352f] text-white shadow-md' : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'}`}>
-                                                {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                            </button>
-                                        ))}
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(['gemini', 'xai', 'openai', 'anthropic', 'custom'] as const).map(provider => {
+                                            const displayName = provider === 'xai' ? 'xAI' : provider.charAt(0).toUpperCase() + provider.slice(1);
+                                            return (
+                                                <button key={provider} onClick={() => setNewConnection({ ...newConnection, provider, modelName: provider === 'gemini' ? DEFAULT_GEMINI_MODEL : provider === 'xai' ? DEFAULT_XAI_MODEL : '' })}
+                                                    className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${newConnection.provider === provider ? 'border-[#37352f] bg-[#37352f] text-white shadow-md' : 'border-[#e9e9e8] bg-white text-[#787774] hover:bg-[#fbfbfa]'}`}>
+                                                    {displayName}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                                 <div>
@@ -349,13 +371,17 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                                         <select value={newConnection.modelName || DEFAULT_GEMINI_MODEL} onChange={e => setNewConnection({ ...newConnection, modelName: e.target.value })} className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f]">
                                             {GEMINI_MODEL_OPTIONS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
                                         </select>
+                                    ) : newConnection.provider === 'xai' ? (
+                                        <select value={newConnection.modelName || DEFAULT_XAI_MODEL} onChange={e => setNewConnection({ ...newConnection, modelName: e.target.value })} className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f]">
+                                            {XAI_MODEL_OPTIONS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                                        </select>
                                     ) : (
                                         <input type="text" placeholder="예: gpt-4o" value={newConnection.modelName || ''} onChange={e => setNewConnection({ ...newConnection, modelName: e.target.value })} className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f]" />
                                     )}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-2">API Key</label>
-                                    <input type="password" placeholder="AIza... / sk-..." value={newConnection.apiKey || ''} onChange={e => setNewConnection({ ...newConnection, apiKey: e.target.value })} className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] font-mono text-sm" />
+                                    <input type="password" placeholder={newConnection.provider === 'xai' ? 'xai-...' : 'AIza... / sk-...'} value={newConnection.apiKey || ''} onChange={e => setNewConnection({ ...newConnection, apiKey: e.target.value })} className="w-full p-3 border border-[#e9e9e8] rounded-xl focus:outline-none focus:border-[#37352f] font-mono text-sm" />
                                 </div>
                                 <button onClick={addConnection} disabled={!newConnection.modelName || !newConnection.apiKey} className="w-full py-3.5 bg-[#37352f] text-white rounded-xl hover:bg-[#2f2d28] transition-colors font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-2">
                                     연결 추가하기
@@ -382,6 +408,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             {/* ===== 데이터 관리 탭 ===== */}
             {activeTab === 'data' && (
                 <div className="space-y-6">
+                    {/* Manual Sync Section */}
+                    <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 flex items-center justify-between">
+                        <div>
+                            <h3 className="font-bold text-[#37352f]">수동 동기화 (디버깅용)</h3>
+                            <p className="text-sm text-[#787774] mt-1">PC 데이터를 서버로 강제로 전송하고 결과를 확인합니다.</p>
+                        </div>
+                        <button
+                            onClick={onManualSync}
+                            className="px-4 py-2 bg-[#37352f] text-white rounded-lg hover:bg-[#2f2d28] transition-colors text-sm font-bold shadow-sm"
+                        >
+                            지금 동기화
+                        </button>
+                    </div>
+
                     {/* Individual Reset */}
                     <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-1">
                         <h3 className="text-lg text-[#37352f] mb-3">개별 초기화</h3>

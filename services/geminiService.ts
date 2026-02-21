@@ -1,14 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { CalendarEvent, JournalEntry, Todo, AiPost, AIAgent, ChatMode } from "../types";
+import { CalendarEvent, JournalEntry, Todo, AiPost, AIAgent, ChatMode, ApiConnection } from "../types";
 import { DEFAULT_GEMINI_MODEL, normalizeGeminiModelName } from "../utils/aiConfig";
-
-const RELAXED_SAFETY_SETTINGS = [
-  { category: "HARM_CATEGORY_HARASSMENT" as any, threshold: "BLOCK_NONE" as any },
-  { category: "HARM_CATEGORY_HATE_SPEECH" as any, threshold: "BLOCK_NONE" as any },
-  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT" as any, threshold: "BLOCK_NONE" as any },
-  { category: "HARM_CATEGORY_DANGEROUS_CONTENT" as any, threshold: "BLOCK_NONE" as any },
-  { category: "HARM_CATEGORY_CIVIC_INTEGRITY" as any, threshold: "BLOCK_NONE" as any },
-];
+import { callXaiChatJSON } from "./xaiService";
 
 const CHAT_HISTORY_LIMIT = 12;
 const MODEL_MESSAGE_CHAR_LIMIT = 600;
@@ -47,6 +40,32 @@ const sanitizeAssistantReply = (reply: string, agentName?: string): string => {
   }
 
   return result || trimmed;
+};
+
+const stripCrossPersonaSpeech = (
+  reply: string,
+  agentName?: string,
+  otherPersonaNames: string[] = []
+): string => {
+  const base = (reply || "").trim();
+  if (!base) return "";
+
+  const normalizedSelf = (agentName || "").trim().toLowerCase();
+  const blockedNames = otherPersonaNames
+    .map((name) => (name || "").trim())
+    .filter((name) => name.length > 0 && name.toLowerCase() !== normalizedSelf);
+
+  if (blockedNames.length === 0) return base;
+
+  const patterns = blockedNames.map((name) => {
+    const escaped = escapeRegex(name);
+    return new RegExp(`^\\s*(?:[-*•]\\s*)?(?:\\[\\s*)?${escaped}(?:\\s*님)?(?:\\s*\\])?\\s*[:：-]\\s*`, "i");
+  });
+
+  const lines = base.split("\n");
+  const filtered = lines.filter((line) => !patterns.some((pattern) => pattern.test(line)));
+  const cleaned = filtered.join("\n").trim();
+  return cleaned || base;
 };
 
 const truncateForModel = (text: string, maxChars: number): string => {
@@ -160,7 +179,8 @@ export const generateLifeInsight = async (
   events: CalendarEvent[],
   todos: Todo[],
   journalEntries: JournalEntry[],
-  modelName: string = DEFAULT_GEMINI_MODEL
+  modelName: string = DEFAULT_GEMINI_MODEL,
+  provider: ApiConnection['provider'] = 'gemini'
 ): Promise<AiPost> => {
   if (!apiKey) {
     throw new Error("API Key is required.");
@@ -180,8 +200,6 @@ export const generateLifeInsight = async (
   const prompt = `
 You are the LifeSync analysis assistant.
 Write in Korean.
-When you mention the user, always call them "\\uC8FC\\uC778\\uB2D8".
-Do not use other labels such as "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
 
 Analyze this context:
 ${JSON.stringify(contextData, null, 2)}
@@ -193,6 +211,25 @@ Output JSON with:
 `;
 
   try {
+    if (provider === 'xai') {
+      const xaiSystemPrompt = `${prompt}\n\nIMPORTANT: You MUST respond with a valid JSON object with exactly these keys: "title" (string), "content" (string), "tags" (array of strings).`;
+      const parsed = await callXaiChatJSON(
+        apiKey,
+        xaiSystemPrompt,
+        [{ role: 'user', content: 'Generate the insight now.' }],
+        modelName,
+        { temperature: 0.5, maxTokens: 900 }
+      );
+      return {
+        id: crypto.randomUUID(),
+        title: parsed.title || "오늘의 인사이트",
+        content: parsed.content || "분석 결과를 생성하지 못했습니다.",
+        tags: Array.isArray(parsed.tags) ? parsed.tags : ["Insight", "Daily"],
+        date: new Date().toISOString(),
+        type: "analysis",
+      };
+    }
+
     const response = await ai.models.generateContent({
       model: normalizeGeminiModelName(modelName),
       contents: prompt,
@@ -202,7 +239,6 @@ Output JSON with:
           temperature: 0.5,
           maxOutputTokens: 900,
         },
-        safetySettings: RELAXED_SAFETY_SETTINGS,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -225,7 +261,7 @@ Output JSON with:
       type: "analysis",
     };
   } catch (error) {
-    console.error("Gemini generation failed:", error);
+    console.error("AI generation failed:", error);
     throw new Error("AI insight generation failed.");
   }
 };
@@ -332,7 +368,9 @@ export const generateChatResponse = async (
   modelName: string = DEFAULT_GEMINI_MODEL,
   agent?: AIAgent,
   mode: ChatMode = "basic",
-  personaMemoryContext: string = ""
+  personaMemoryContext: string = "",
+  provider: ApiConnection['provider'] = 'gemini',
+  otherPersonaNames: string[] = []
 ): Promise<ChatActionResult> => {
   if (!apiKey) throw new Error("API Key is required.");
 
@@ -356,17 +394,18 @@ export const generateChatResponse = async (
   const agentTone = agent?.tone || "Warm and clear";
 
   const modeInstruction =
-    mode === "roleplay"
-      ? "Stay fully in-character as the selected persona."
-      : mode === "learning"
-        ? "Explain clearly and teach step by step when useful."
-        : "Keep answers practical and direct.";
+    mode === "learning"
+      ? "Explain clearly and teach step by step when useful."
+      : "Keep answers practical and direct.";
 
   const memoryInstruction = personaMemoryContext
     ? `[Long-term memory from previous chat sessions]\n${truncateForModel(personaMemoryContext, 1000)}\n\n`
     : "";
+  const otherPersonaInstruction = otherPersonaNames.length > 0
+    ? `Other persona names currently in this chat: ${otherPersonaNames.join(", ")}.\nNever output lines or dialogue prefixed with those names.`
+    : "";
 
-  const systemInstruction = `
+  const geminiSystemInstruction = `
 ${memoryInstruction}
 You are "${agentName}" (${agentRole}).
 Persona profile: ${agentPersonality}
@@ -378,30 +417,99 @@ Conversation context:
 - Pending todos: ${JSON.stringify(contextData.pendingTasks)}
 - Recent journal: ${JSON.stringify(contextData.recentJournal)}
 
-Critical naming rule:
-- Always call the user "\\uC8FC\\uC778\\uB2D8".
-- Never call the user by name, "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
+Persona guidance:
+- Follow this tone: ${agentTone}.
+- ${modeInstruction}
+- Speak like a real person, not a scripted assistant.
+- Vary sentence rhythm and wording each turn. Avoid fixed opening/ending patterns.
+- Keep the voice specific to this persona's role/personality.
+- Use calendar/todo/journal context only when directly relevant to the user's current request.
+- Use bullets only when the user asks for structured output.
+- Match the user's language naturally.
+- ${otherPersonaInstruction || "No other persona constraint provided."}
+`;
 
-Behavior rules:
-1. Reply in Korean.
-2. Follow this tone: ${agentTone}.
-3. Keep responses concise unless the user asks for depth.
-4. Use line breaks and lightweight formatting when it improves readability.
-5. ${modeInstruction}
-6. Do not prefix your reply with your name or self tags (for example: "[${agentName}]" or "${agentName}:").
+  const xaiSystemInstruction = `
+${memoryInstruction}
+You are "${agentName}" (${agentRole}) speaking as a distinct persona.
+Persona profile: ${agentPersonality}
+
+Conversation context:
+- Date: ${today}
+- Time: ${currentTime}
+- Upcoming events: ${JSON.stringify(contextData.upcomingEvents)}
+- Pending todos: ${JSON.stringify(contextData.pendingTasks)}
+- Recent journal: ${JSON.stringify(contextData.recentJournal)}
+
+Persona guidance:
+- Apply this tone strongly: ${agentTone}.
+- ${modeInstruction}
+- 한국어는 원어민처럼 자연스럽게 작성해. 어색한 직역투, 번역체 문장, 부자연스러운 조사/어미를 피해.
+- 같은 문장 끝 패턴을 반복하지 말고, 답변마다 리듬과 어감을 조금씩 바꿔.
+- 사람처럼 대화하듯 답하고, 템플릿처럼 기계적으로 쓰지 마.
+- 달력/할일/메모 맥락은 현재 요청과 직접 관련 있을 때만 사용해.
+- 구조화된 출력을 요청받지 않으면 목록형 문장을 남발하지 마.
+- Use vivid wording unique to this persona's role.
+- ${otherPersonaInstruction || "No other persona constraint provided."}
 `;
 
   try {
     const validContents = toModelContents(messageHistory, CHAT_HISTORY_LIMIT, MODEL_MESSAGE_CHAR_LIMIT);
+
+    // --- XAI branch ---
+    if (provider === 'xai') {
+      const jsonSchemaInstruction = `
+
+IMPORTANT: You MUST respond with a valid JSON object with exactly these keys:
+- "reply": string (your conversational response)
+- "action": object with key "type" (one of: "add_event", "delete_event", "add_todo", "add_journal", "generate_insight", "none")
+  - If type is "add_event", include "event": { "title": string, "date": string (YYYY-MM-DD), "startTime"?: string (HH:mm), "endTime"?: string (HH:mm), "type"?: string }
+  - If type is "delete_event", include "deleteEvent": { "id"?: string, "title"?: string, "date"?: string, "startTime"?: string }
+  - If type is "add_todo", include "todo": { "text": string, "category"?: string, "dueDate"?: string }
+  - If type is "add_journal", include "journal": { "title": string, "content": string, "mood"?: string }
+  - If type is "none", no additional fields needed.
+`;
+
+      const xaiMessages = validContents.map(msg => ({
+        role: (msg.role === 'model' ? 'assistant' : msg.role) as 'user' | 'assistant',
+        content: msg.parts.map((p: any) => p.text).join(''),
+      }));
+
+      const latestUserText = [...messageHistory].reverse().find((m) => m.role === "user")?.content || "";
+      const nowForSanitize = new Date();
+
+      try {
+        const parsed: ChatActionResult = await callXaiChatJSON(
+          apiKey,
+          xaiSystemInstruction + jsonSchemaInstruction,
+          xaiMessages,
+          modelName,
+          { temperature: 0.68, maxTokens: 520 }
+        );
+        const cleanedReply = stripCrossPersonaSpeech(
+          sanitizeAssistantReply(parsed.reply || "", agentName),
+          agentName,
+          otherPersonaNames
+        );
+        return {
+          reply: typeof cleanedReply === "string" && cleanedReply.trim() ? cleanedReply : "도와드릴게요.",
+          action: sanitizeAction(parsed.action, latestUserText, nowForSanitize),
+        };
+      } catch {
+        return { reply: "죄송해요, 답변 생성에 실패했어요.", action: { type: "none" } };
+      }
+    }
+
+    // --- Gemini branch ---
     const response = await ai.models.generateContent({
       model: normalizeGeminiModelName(modelName),
       contents: validContents,
       config: {
-        systemInstruction: { parts: [{ text: systemInstruction }] },
+        systemInstruction: { parts: [{ text: geminiSystemInstruction }] },
         responseMimeType: "application/json",
         generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: mode === "roleplay" ? 520 : 420,
+          temperature: 0.68,
+          maxOutputTokens: 500,
         },
         responseSchema: {
           type: Type.OBJECT,
@@ -456,7 +564,6 @@ Behavior rules:
           },
           required: ["reply", "action"],
         },
-        safetySettings: RELAXED_SAFETY_SETTINGS,
       },
     });
 
@@ -466,16 +573,25 @@ Behavior rules:
 
     try {
       const parsed: ChatActionResult = JSON.parse(text);
-      const cleanedReply = sanitizeAssistantReply(parsed.reply || "", agentName);
+      const cleanedReply = stripCrossPersonaSpeech(
+        sanitizeAssistantReply(parsed.reply || "", agentName),
+        agentName,
+        otherPersonaNames
+      );
       return {
-        reply: typeof cleanedReply === "string" && cleanedReply.trim() ? cleanedReply : "도와드릴게요, 주인님.",
+        reply: typeof cleanedReply === "string" && cleanedReply.trim() ? cleanedReply : "도와드릴게요.",
         action: sanitizeAction(parsed.action, latestUserText, nowForSanitize),
       };
     } catch {
-      return { reply: sanitizeAssistantReply(text, agentName) || "죄송해요, 답변 생성에 실패했어요.", action: { type: "none" } };
+      const cleanedText = stripCrossPersonaSpeech(
+        sanitizeAssistantReply(text, agentName),
+        agentName,
+        otherPersonaNames
+      );
+      return { reply: cleanedText || "죄송해요, 답변 생성에 실패했어요.", action: { type: "none" } };
     }
   } catch (error) {
-    console.error("Gemini chat generation failed:", error);
+    console.error("Chat generation failed:", error);
     return { reply: "죄송해요, 잠시 후 다시 시도해 주세요.", action: { type: "none" } };
   }
 };
@@ -512,11 +628,9 @@ export const generateGroupChatResponses = async (
   };
 
   const modeInstruction =
-    mode === "roleplay"
-      ? "Stay fully in-character as each persona."
-      : mode === "learning"
-        ? "Explain clearly and teach step by step when useful."
-        : "Keep answers practical and direct.";
+    mode === "learning"
+      ? "Explain clearly and teach step by step when useful."
+      : "Keep answers practical and direct.";
 
   const personaBlock = selectedAgents
     .map((persona, index) => {
@@ -538,11 +652,6 @@ export const generateGroupChatResponses = async (
   const systemInstruction = `
 You are a multi-persona chat orchestrator for LifeSync.
 Generate exactly one reply for each listed persona id.
-Reply in Korean.
-
-Critical naming rule:
-- Always call the user "\\uC8FC\\uC778\\uB2D8".
-- Never call the user by name, "\\uC0AC\\uC6A9\\uC790", "\\uB108", or "\\uB2F9\\uC2E0".
 
 Conversation context:
 - Date: ${today}
@@ -639,7 +748,6 @@ Output rules:
           },
           required: ["responses"],
         },
-        safetySettings: RELAXED_SAFETY_SETTINGS,
       },
     });
 

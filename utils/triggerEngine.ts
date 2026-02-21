@@ -32,7 +32,7 @@ const ARIA_RESPONSES: Record<string, string[]> = {
   ],
 };
 
-const AGENT_ROTATION_KEY = 'ls_ai_agent_rotation';
+const agentRotationMap: Record<string, number> = {};
 
 const fillTemplate = (template: string, context: Record<string, any>): string => {
   return template.replace(/\{(\w+)\}/g, (match, key) => {
@@ -63,14 +63,9 @@ const getRotatingAgentId = (agentPool: AIAgent[], chainKey: string): string => {
   if (agentPool.length === 0) return DEFAULT_AGENTS[0].id;
 
   try {
-    if (typeof localStorage === 'undefined') return agentPool[0].id;
-
-    const raw = localStorage.getItem(AGENT_ROTATION_KEY);
-    const map = raw ? JSON.parse(raw) as Record<string, number> : {};
-    const current = Number.isFinite(map[chainKey]) ? map[chainKey] : 0;
+    const current = Number.isFinite(agentRotationMap[chainKey]) ? agentRotationMap[chainKey] : 0;
     const nextIndex = current % agentPool.length;
-    map[chainKey] = current + 1;
-    localStorage.setItem(AGENT_ROTATION_KEY, JSON.stringify(map));
+    agentRotationMap[chainKey] = current + 1;
     return agentPool[nextIndex].id;
   } catch {
     return agentPool[Math.floor(Math.random() * agentPool.length)].id;
@@ -122,11 +117,7 @@ export const generateCommunityPosts = (
             'Write in Korean.',
             'This is NOT a message to the user. This is your private diary.',
             'Write from first-person AI perspective.',
-            'Do not address the user directly as second-person pronouns.',
-            'When referring to the human in this diary, always use "주인님".',
-            'Never use other labels for the human (such as "사용자", "너", or a name).',
             'Write like a human diary entry in natural prose.',
-            'Do not use markdown, bullets, numbered lists, or section headers.',
             'Main theme: the human\'s long-term growth.',
             'Include your own curiosity, hypotheses, and growth-design ideas.',
             'Quality requirements:',
@@ -222,11 +213,9 @@ Current snapshot:
         agent,
         [
           'Write an empathetic and practical Korean comment for your owner.',
-          'Always call the user "주인님".',
           'Length requirement: 5-8 sentences, around 220-420 Korean characters.',
           'Structure: acknowledge emotion -> summarize observation -> suggest one concrete next action.',
           'Use line breaks for readability.',
-          'Do not use markdown headings, tables, or code blocks.',
         ].join(' '),
         userActionStr
       );

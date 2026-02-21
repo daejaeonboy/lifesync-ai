@@ -4,7 +4,7 @@ import { generateLifeInsight } from '../services/geminiService';
 import { Sparkles, Layout, CalendarIcon, CheckSquare, BookOpen, ChevronRight, Check } from '../components/Icons';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { getActiveGeminiConfig } from '../utils/aiConfig';
+import { getActiveAIConfig } from '../utils/aiConfig';
 
 interface BoardViewProps {
   posts: AiPost[];
@@ -20,25 +20,26 @@ interface BoardViewProps {
 
 const BoardView: React.FC<BoardViewProps> = ({ posts, events, todos, entries, settings, onAddPost, onDeletePost, onToggleTodo, onViewAllTodos }) => {
   const [isGenerating, setIsGenerating] = useState(false);
-  const activeGeminiConfig = getActiveGeminiConfig(settings);
+  const activeAIConfig = getActiveAIConfig(settings);
 
   const pendingTodos = todos.filter(t => !t.completed).slice(0, 3);
   const todayEvents = events.slice(0, 3); // In real app, filter by today
 
   const handleGenerateInsight = async () => {
-    if (!activeGeminiConfig?.apiKey) {
-      alert('API 연결이 설정되지 않았습니다. 설정 > API 연결 설정에서 Gemini 모델을 선택해주세요.');
+    if (!activeAIConfig?.apiKey) {
+      alert('API 연결이 설정되지 않았습니다. 설정 > API 연결 설정에서 모델을 선택해주세요.');
       return;
     }
 
     setIsGenerating(true);
     try {
       const newPost = await generateLifeInsight(
-        activeGeminiConfig.apiKey,
+        activeAIConfig.apiKey,
         events,
         todos,
         entries,
-        activeGeminiConfig.modelName
+        activeAIConfig.modelName,
+        activeAIConfig.provider
       );
       onAddPost(newPost);
     } catch (error) {
