@@ -235,10 +235,8 @@ Output JSON with:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: 900,
-        },
+        temperature: 0.5,
+        maxOutputTokens: 900,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -507,10 +505,8 @@ IMPORTANT: You MUST respond with a valid JSON object with exactly these keys:
       config: {
         systemInstruction: { parts: [{ text: geminiSystemInstruction }] },
         responseMimeType: "application/json",
-        generationConfig: {
-          temperature: 0.68,
-          maxOutputTokens: 500,
-        },
+        temperature: 0.68,
+        maxOutputTokens: 500,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -681,10 +677,8 @@ Output rules:
       config: {
         systemInstruction: { parts: [{ text: systemInstruction }] },
         responseMimeType: "application/json",
-        generationConfig: {
-          temperature: 0.55,
-          maxOutputTokens: 760,
-        },
+        temperature: 0.55,
+        maxOutputTokens: 760,
         responseSchema: {
           type: Type.OBJECT,
           properties: {

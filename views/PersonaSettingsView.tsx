@@ -9,9 +9,6 @@ interface PersonaSettingsViewProps {
   onUpdateAgents: (agents: AIAgent[]) => void;
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
-  onExportData: () => void;
-  onClearAllData: () => void;
-  onClearActivity: () => void;
 }
 
 const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
@@ -19,9 +16,6 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
   onUpdateAgents,
   settings,
   onUpdateSettings,
-  onExportData,
-  onClearAllData,
-  onClearActivity,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AIAgent | null>(null);
@@ -101,21 +95,21 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12 px-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-normal text-[#37352f]">페르소나 설정</h2>
           <p className="text-sm text-[#787774] mt-1">AI 페르소나를 편집하고 행동 옵션을 조정하세요.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 self-start sm:self-auto shrink-0">
           <button
             onClick={addCustomAgent}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-white text-sm hover:bg-[#2b2924] transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#37352f] text-white text-sm hover:bg-[#2b2924] transition-colors whitespace-nowrap"
           >
             <Plus size={14} /> 추가
           </button>
           <button
             onClick={resetAgents}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-[#37352f] text-sm hover:bg-[#f7f7f5] transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-[#37352f] text-sm hover:bg-[#f7f7f5] transition-colors whitespace-nowrap"
           >
             <RotateCcw size={14} /> 기본값
           </button>
@@ -172,57 +166,41 @@ const PersonaSettingsView: React.FC<PersonaSettingsViewProps> = ({
         ))}
       </div>
 
-      <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-4">
-        <h3 className="text-lg text-[#37352f]">동작 옵션</h3>
-        <label className="flex items-center justify-between py-2">
-          <div>
-            <div className="text-sm text-[#37352f]">AI 자동 반응</div>
-            <div className="text-xs text-[#9b9a97]">일기/할 일/일정 이벤트에 AI 반응을 생성합니다.</div>
+      <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 mb-8">
+        <h3 className="text-lg text-[#37352f] mb-3">동작 옵션</h3>
+        <label className="flex items-center justify-between gap-4 py-3 cursor-pointer border-b border-[#f2f2f0] last:border-0 relative">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-[#37352f] truncate">AI 자동 반응</div>
+            <div className="text-xs text-[#9b9a97] mt-0.5 leading-relaxed break-keep">일기, 할 일, 일정 이벤트에 AI가 반응을 자동 생성합니다.</div>
           </div>
-          <input
-            type="checkbox"
-            checked={settings.autoAiReactions}
-            onChange={(e) => onUpdateSettings({ ...settings, autoAiReactions: e.target.checked })}
-            className="w-4 h-4 accent-[#37352f]"
-          />
+          <div className="relative inline-flex items-center shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={settings.autoAiReactions}
+              onChange={(e) => onUpdateSettings({ ...settings, autoAiReactions: e.target.checked })}
+            />
+            <div className="w-11 h-6 bg-[#d9d9d7] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#d9d9d7] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#37352f] shadow-inner"></div>
+          </div>
         </label>
-        <label className="flex items-center justify-between py-2">
-          <div>
-            <div className="text-sm text-[#37352f]">채팅 실행 전 확인</div>
-            <div className="text-xs text-[#9b9a97]">채팅에서 일정/할 일 생성 전에 확인 단계를 보여줍니다.</div>
+        <label className="flex items-center justify-between gap-4 py-3 cursor-pointer border-b border-[#f2f2f0] last:border-0 relative">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-[#37352f] truncate">채팅 실행 전 확인</div>
+            <div className="text-xs text-[#9b9a97] mt-0.5 leading-relaxed break-keep">채팅에서 일정/할 일 생성 전에 추가 확인 단계를 거칩니다.</div>
           </div>
-          <input
-            type="checkbox"
-            checked={settings.chatActionConfirm}
-            onChange={(e) => onUpdateSettings({ ...settings, chatActionConfirm: e.target.checked })}
-            className="w-4 h-4 accent-[#37352f]"
-          />
+          <div className="relative inline-flex items-center shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={settings.chatActionConfirm}
+              onChange={(e) => onUpdateSettings({ ...settings, chatActionConfirm: e.target.checked })}
+            />
+            <div className="w-11 h-6 bg-[#d9d9d7] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#d9d9d7] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#37352f] shadow-inner"></div>
+          </div>
         </label>
       </div>
 
-      <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-3">
-        <h3 className="text-lg text-[#37352f]">데이터 관리</h3>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={onExportData}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
-          >
-            <Download size={14} /> 내보내기
-          </button>
-          <button
-            onClick={onClearActivity}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d9d9d7] text-sm text-[#37352f] hover:bg-[#f7f7f5]"
-          >
-            <Trash size={14} /> 활동 로그 삭제
-          </button>
-          <button
-            onClick={onClearAllData}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#d94848] text-sm text-white hover:bg-[#c33f3f]"
-          >
-            <Trash2 size={14} /> 전체 데이터 초기화
-          </button>
-        </div>
-      </div>
+
 
       {editingId && draft && (
         <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-hidden">

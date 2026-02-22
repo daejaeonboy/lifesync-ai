@@ -23,7 +23,6 @@ interface SettingsViewProps {
     onClearTodos: () => void;
     onClearEntries: () => void;
     onClearChat: () => void;
-    onManualSync: () => Promise<void>;
 }
 
 const maskApiKey = (key: string): string => {
@@ -47,7 +46,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     onClearTodos,
     onClearEntries,
     onClearChat,
-    onManualSync,
 }) => {
     const [activeTab, setActiveTab] = useState<SettingsTab>('account');
 
@@ -399,29 +397,12 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     onUpdateAgents={onUpdateAgents}
                     settings={settings}
                     onUpdateSettings={onUpdateSettings}
-                    onExportData={onExportData}
-                    onClearAllData={onClearAllData}
-                    onClearActivity={onClearActivity}
                 />
             )}
 
             {/* ===== 데이터 관리 탭 ===== */}
             {activeTab === 'data' && (
                 <div className="space-y-6">
-                    {/* Manual Sync Section */}
-                    <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 flex items-center justify-between">
-                        <div>
-                            <h3 className="font-bold text-[#37352f]">수동 동기화 (디버깅용)</h3>
-                            <p className="text-sm text-[#787774] mt-1">PC 데이터를 서버로 강제로 전송하고 결과를 확인합니다.</p>
-                        </div>
-                        <button
-                            onClick={onManualSync}
-                            className="px-4 py-2 bg-[#37352f] text-white rounded-lg hover:bg-[#2f2d28] transition-colors text-sm font-bold shadow-sm"
-                        >
-                            지금 동기화
-                        </button>
-                    </div>
-
                     {/* Individual Reset */}
                     <div className="bg-white border border-[#e9e9e8] rounded-xl p-5 space-y-1">
                         <h3 className="text-lg text-[#37352f] mb-3">개별 초기화</h3>

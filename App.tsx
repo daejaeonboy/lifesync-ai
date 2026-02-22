@@ -1727,7 +1727,6 @@ const App: React.FC = () => {
             onClearTodos={handleClearTodos}
             onClearEntries={handleClearEntries}
             onClearChat={handleClearChat}
-            onManualSync={handleManualSync}
           />
         );
       case 'chat':
@@ -2192,9 +2191,9 @@ const App: React.FC = () => {
                     <span className="text-[11px] font-medium text-[#787774] uppercase tracking-wider">카테고리</span>
                     <button
                       onClick={() => setIsAddingJournalCategory(true)}
-                      className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] opacity-0 group-hover:opacity-100 transition-all"
+                      className="p-1 hover:bg-[#efefef] rounded text-[#9b9a97] hover:text-[#37352f] transition-all"
                     >
-                      <Plus size={12} />
+                      <Plus size={16} />
                     </button>
                   </div>
 
